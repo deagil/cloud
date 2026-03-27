@@ -1,6 +1,8 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  // Keep sandbox SDK and Node streams on the server runtime; avoids broken stream constructors when bundling.
+  serverExternalPackages: ['@vercel/sandbox'],
   images: {
     remotePatterns: [
       {

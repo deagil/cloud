@@ -1,6 +1,8 @@
-import { LogEntry } from '@/lib/db/schema'
-
-export type { LogEntry }
+export interface LogEntry {
+  type: 'info' | 'command' | 'error' | 'success'
+  message: string
+  timestamp: Date | string
+}
 
 // Redact sensitive information from log messages
 export function redactSensitiveInfo(message: string): string {

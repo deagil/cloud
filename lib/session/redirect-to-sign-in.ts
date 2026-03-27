@@ -1,7 +1,14 @@
-export async function redirectToSignIn(): Promise<void> {
+import { isRelativeUrl } from '@/lib/utils/is-relative-url'
+
+/**
+ * @param next - Safe relative path to return to after Vercel OAuth (e.g. from login page). Falls back to current pathname.
+ */
+export async function redirectToSignIn(next?: string): Promise<void> {
+  const nextPath = next !== undefined && next.length > 0 && isRelativeUrl(next) ? next : window.location.pathname
+
   const response = await fetch(
     `/api/auth/signin/vercel?${new URLSearchParams({
-      next: window.location.pathname,
+      next: nextPath,
     }).toString()}`,
     { method: 'POST' },
   )

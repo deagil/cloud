@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq, and, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getOctokit } from '@/lib/github/client'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { PROJECT_DIR } from '@/lib/sandbox/commands'
@@ -157,24 +155,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Missing filename parameter' }, { status: 400 })
     }
 
-    // Get task from database and verify ownership (exclude soft-deleted)
-    const [task] = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+    const supabase = createAdminClient()
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
       .limit(1)
+      .maybeSingle()
 
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
 
-    if (!task.branchName || !task.repoUrl) {
+    if (!task.branch_name || !task.repo_url) {
       return NextResponse.json({ error: 'Task does not have branch or repository information' }, { status: 400 })
     }
 
     // Handle local diff mode (git diff in sandbox)
     if (mode === 'local') {
-      if (!task.sandboxId) {
+      if (!task.sandbox_id) {
         return NextResponse.json({ error: 'Sandbox not available' }, { status: 400 })
       }
 
@@ -192,7 +193,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
           if (sandboxToken && teamId && projectId) {
             sandbox = await Sandbox.get({
-              sandboxId: task.sandboxId,
+              sandboxId: task.sandbox_id,
               teamId,
               projectId,
               token: sandboxToken,
@@ -207,12 +208,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         // Fetch latest from remote to ensure we have up-to-date remote refs
         const fetchResult = await sandbox.runCommand({
           cmd: 'git',
-          args: ['fetch', 'origin', task.branchName],
+          args: ['fetch', 'origin', task.branch_name],
           cwd: PROJECT_DIR,
         })
 
         // Check if remote branch actually exists (even if fetch succeeds, the branch might not exist)
-        const remoteBranchRef = `origin/${task.branchName}`
+        const remoteBranchRef = `origin/${task.branch_name}`
         const checkRemoteResult = await sandbox.runCommand({
           cmd: 'git',
           args: ['rev-parse', '--verify', remoteBranchRef],
@@ -327,7 +328,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // Parse GitHub repository URL to get owner and repo
-    const githubMatch = task.repoUrl.match(/github\.com\/([^\/]+)\/([^\/\.]+)/)
+    const githubMatch = task.repo_url.match(/github\.com\/([^\/]+)\/([^\/\.]+)/)
     if (!githubMatch) {
       return NextResponse.json({ error: 'Invalid GitHub repository URL' }, { status: 400 })
     }
@@ -360,15 +361,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       let oldIsBase64 = false
       let newIsBase64 = false
       let baseRef = 'main'
-      let headRef = task.branchName
+      let headRef = task.branch_name
 
       // For PRs (merged or open), use the exact base and head SHAs from the PR
-      if (task.prNumber) {
+      if (task.pr_number) {
         try {
           const prResponse = await octokit.rest.pulls.get({
             owner,
             repo,
-            pull_number: task.prNumber,
+            pull_number: task.pr_number,
           })
 
           // Use the base commit SHA (what main was at PR creation time)
@@ -379,14 +380,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           console.log('Using PR refs - base:', baseRef, 'head:', headRef)
 
           // Update merge commit SHA if merged and we don't have it
-          if (prResponse.data.merged_at && prResponse.data.merge_commit_sha && !task.prMergeCommitSha) {
-            await db
-              .update(tasks)
-              .set({
-                prMergeCommitSha: prResponse.data.merge_commit_sha,
-                updatedAt: new Date(),
-              })
-              .where(eq(tasks.id, task.id))
+          if (prResponse.data.merged_at && prResponse.data.merge_commit_sha && !task.pr_merge_commit_sha) {
+            await supabase
+              .from('tasks')
+              .update({ pr_merge_commit_sha: prResponse.data.merge_commit_sha, updated_at: new Date().toISOString() })
+              .eq('id', task.id)
           }
         } catch (error) {
           console.error('Failed to fetch PR data, falling back to branch comparison:', error)

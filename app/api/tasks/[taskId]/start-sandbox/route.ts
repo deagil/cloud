@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { Sandbox } from '@vercel/sandbox'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { getGitHubUser } from '@/lib/github/client'
@@ -12,6 +10,7 @@ import { detectPackageManager, installDependencies } from '@/lib/sandbox/package
 import { createTaskLogger } from '@/lib/utils/task-logger'
 import { getMaxSandboxDuration } from '@/lib/db/settings'
 import { detectPortFromRepo } from '@/lib/sandbox/port-detection'
+import { getNodeWritableClass } from '@/lib/sandbox/node-writable'
 
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ taskId: string }> }) {
   try {
@@ -23,29 +22,35 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     const { taskId } = await params
 
     // Get the task
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+    const supabase = createAdminClient()
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('id, user_id, sandbox_id, sandbox_url, keep_alive, repo_url, branch_name, max_duration')
+      .eq('id', taskId)
+      .limit(1)
+      .maybeSingle()
 
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
 
     // Verify ownership
-    if (task.userId !== session.user.id) {
+    if (task.user_id !== session.user.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 
     // Check if keep-alive is enabled
-    if (!task.keepAlive) {
+    if (!task.keep_alive) {
       return NextResponse.json({ error: 'Keep-alive is not enabled for this task' }, { status: 400 })
     }
 
     const logger = createTaskLogger(taskId)
 
     // Check if sandbox is already running by verifying if it's actually accessible
-    if (task.sandboxId && task.sandboxUrl) {
+    if (task.sandbox_id && task.sandbox_url) {
       try {
         const existingSandbox = await Sandbox.get({
-          sandboxId: task.sandboxId,
+          sandboxId: task.sandbox_id,
           teamId: process.env.SANDBOX_VERCEL_TEAM_ID!,
           projectId: process.env.SANDBOX_VERCEL_PROJECT_ID!,
           token: process.env.SANDBOX_VERCEL_TOKEN!,
@@ -60,14 +65,14 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
         // Sandbox is not accessible, clear it from the database and registry, then continue
         await logger.info('Existing sandbox not accessible, clearing and creating new one')
         unregisterSandbox(taskId)
-        await db
-          .update(tasks)
-          .set({
-            sandboxId: null,
-            sandboxUrl: null,
-            updatedAt: new Date(),
+        await supabase
+          .from('tasks')
+          .update({
+            sandbox_id: null,
+            sandbox_url: null,
+            updated_at: new Date().toISOString(),
           })
-          .where(eq(tasks.id, taskId))
+          .eq('id', taskId)
       }
     }
 
@@ -78,13 +83,13 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
 
     // Get max sandbox duration - use task's maxDuration if available, otherwise fall back to global setting
     const maxSandboxDuration = await getMaxSandboxDuration(session.user.id)
-    const maxDurationMinutes = task.maxDuration || maxSandboxDuration
+    const maxDurationMinutes = task.max_duration || maxSandboxDuration
 
     // Get GitHub token for authenticated API access
     const githubToken = await getUserGitHubToken()
 
     // Detect the appropriate port for the project
-    const port = task.repoUrl ? await detectPortFromRepo(task.repoUrl, githubToken) : 3000
+    const port = task.repo_url ? await detectPortFromRepo(task.repo_url, githubToken) : 3000
     console.log(`Detected port ${port} for project`)
 
     // Create a new sandbox by cloning the repo
@@ -93,11 +98,11 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
       projectId: process.env.SANDBOX_VERCEL_PROJECT_ID!,
       token: process.env.SANDBOX_VERCEL_TOKEN!,
       source:
-        task.repoUrl && task.branchName
+        task.repo_url && task.branch_name
           ? {
               type: 'git' as const,
-              url: task.repoUrl,
-              revision: task.branchName,
+              url: task.repo_url,
+              revision: task.branch_name,
               depth: 1,
             }
           : undefined,
@@ -253,8 +258,7 @@ export default mergeConfig(userConfig, defineConfig({
           // Start dev server in detached mode (runs in background) with log capture
           const fullDevCommand = devArgs.length > 0 ? `${devCommand} ${devArgs.join(' ')}` : devCommand
 
-          // Import Writable for stream capture
-          const { Writable } = await import('stream')
+          const Writable = getNodeWritableClass()
 
           const captureServerStdout = new Writable({
             write(chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void) {
@@ -300,14 +304,14 @@ export default mergeConfig(userConfig, defineConfig({
     }
 
     // Update task with new sandbox info
-    await db
-      .update(tasks)
-      .set({
-        sandboxId,
-        sandboxUrl: sandboxUrl || undefined,
-        updatedAt: new Date(),
+    await supabase
+      .from('tasks')
+      .update({
+        sandbox_id: sandboxId,
+        sandbox_url: sandboxUrl || null,
+        updated_at: new Date().toISOString(),
       })
-      .where(eq(tasks.id, taskId))
+      .eq('id', taskId)
 
     await logger.info('Sandbox started successfully')
 

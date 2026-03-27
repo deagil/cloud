@@ -1,124 +1,123 @@
 import 'server-only'
 
-import { db } from './client'
-import { users, accounts, type InsertUser } from './schema'
-import { eq, and } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { type InsertUser } from './schema'
 import { nanoid } from 'nanoid'
 
-/**
- * Find or create a user in the database
- * Returns the internal user ID (our generated ID, not the external auth provider ID)
- *
- * IMPORTANT: This checks if the externalId is already connected to an existing user via accounts
- * to prevent duplicate accounts when someone connects GitHub then later signs in with GitHub
- */
 export async function upsertUser(
   userData: Omit<InsertUser, 'id' | 'createdAt' | 'updatedAt' | 'lastLoginAt'>,
 ): Promise<string> {
   const { provider, externalId, accessToken, refreshToken, scope } = userData
+  const supabase = createAdminClient()
 
   // First check: Does this exact provider + externalId combination exist as a primary account?
-  const existingUser = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.provider, provider), eq(users.externalId, externalId)))
+  const { data: existingUser } = await supabase
+    .from('users')
+    .select('id')
+    .eq('provider', provider)
+    .eq('external_id', externalId)
     .limit(1)
+    .maybeSingle()
 
-  if (existingUser.length > 0) {
-    // User exists - update tokens, last login, and other fields that might have changed
-    await db
-      .update(users)
-      .set({
-        accessToken,
-        refreshToken,
-        scope,
+  if (existingUser) {
+    await supabase
+      .from('users')
+      .update({
+        access_token: accessToken,
+        refresh_token: refreshToken ?? null,
+        scope: scope ?? null,
         username: userData.username,
-        email: userData.email,
-        name: userData.name,
-        avatarUrl: userData.avatarUrl,
-        updatedAt: new Date(),
-        lastLoginAt: new Date(),
+        email: userData.email ?? null,
+        name: userData.name ?? null,
+        avatar_url: userData.avatarUrl ?? null,
+        updated_at: new Date().toISOString(),
+        last_login_at: new Date().toISOString(),
       })
-      .where(eq(users.id, existingUser[0].id))
+      .eq('id', existingUser.id)
 
-    return existingUser[0].id
+    return existingUser.id
   }
 
   // Second check: Is this a GitHub account already connected to an existing user via accounts table?
-  // This prevents duplicate accounts when someone:
-  // 1. Signs in with Vercel
-  // 2. Connects GitHub
-  // 3. Later signs in directly with GitHub
   if (provider === 'github') {
-    const existingAccount = await db
-      .select({ userId: accounts.userId })
-      .from(accounts)
-      .where(and(eq(accounts.provider, 'github'), eq(accounts.externalUserId, externalId)))
+    const { data: existingAccount } = await supabase
+      .from('accounts')
+      .select('user_id')
+      .eq('provider', 'github')
+      .eq('external_user_id', externalId)
       .limit(1)
+      .maybeSingle()
 
-    if (existingAccount.length > 0) {
+    if (existingAccount) {
       console.log(
-        `[upsertUser] GitHub account (${externalId}) is already connected to user ${existingAccount[0].userId}. Using existing user.`,
+        `[upsertUser] GitHub account (${externalId}) is already connected to user ${existingAccount.user_id}. Using existing user.`,
       )
 
-      // Update the existing user's last login
-      await db
-        .update(users)
-        .set({
-          updatedAt: new Date(),
-          lastLoginAt: new Date(),
+      await supabase
+        .from('users')
+        .update({
+          updated_at: new Date().toISOString(),
+          last_login_at: new Date().toISOString(),
         })
-        .where(eq(users.id, existingAccount[0].userId))
+        .eq('id', existingAccount.user_id)
 
-      return existingAccount[0].userId
+      return existingAccount.user_id
     }
   }
 
   // User doesn't exist at all - create new
   const userId = nanoid()
-  const now = new Date()
+  const now = new Date().toISOString()
 
-  await db.insert(users).values({
+  await supabase.from('users').insert({
     id: userId,
-    ...userData,
-    createdAt: now,
-    updatedAt: now,
-    lastLoginAt: now,
+    provider,
+    external_id: externalId,
+    access_token: accessToken,
+    refresh_token: refreshToken ?? null,
+    scope: scope ?? null,
+    username: userData.username,
+    email: userData.email ?? null,
+    name: userData.name ?? null,
+    avatar_url: userData.avatarUrl ?? null,
+    created_at: now,
+    updated_at: now,
+    last_login_at: now,
   })
 
   return userId
 }
 
-/**
- * Get user by internal ID
- */
 export async function getUserById(userId: string) {
-  const result = await db.select().from(users).where(eq(users.id, userId)).limit(1)
-  return result[0] || null
+  const supabase = createAdminClient()
+  const { data } = await supabase.from('users').select('*').eq('id', userId).limit(1).maybeSingle()
+  return data || null
 }
 
-/**
- * Get user by auth provider and external ID
- */
 export async function getUserByExternalId(provider: 'github' | 'vercel', externalId: string) {
-  const result = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.provider, provider), eq(users.externalId, externalId)))
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('users')
+    .select('*')
+    .eq('provider', provider)
+    .eq('external_id', externalId)
     .limit(1)
-  return result[0] || null
+    .maybeSingle()
+  return data || null
 }
 
-/**
- * Find user by GitHub account connection
- * Used to check if a GitHub account is already connected to a user
- */
 export async function getUserByGitHubConnection(githubExternalId: string) {
-  const result = await db
-    .select({ user: users })
-    .from(accounts)
-    .innerJoin(users, eq(accounts.userId, users.id))
-    .where(and(eq(accounts.provider, 'github'), eq(accounts.externalUserId, githubExternalId)))
+  const supabase = createAdminClient()
+  const { data: account } = await supabase
+    .from('accounts')
+    .select('user_id')
+    .eq('provider', 'github')
+    .eq('external_user_id', githubExternalId)
     .limit(1)
-  return result[0]?.user || null
+    .maybeSingle()
+
+  if (!account) return null
+
+  const { data: user } = await supabase.from('users').select('*').eq('id', account.user_id).maybeSingle()
+  return user || null
 }

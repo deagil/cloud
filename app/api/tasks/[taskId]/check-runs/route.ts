@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq, and, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { getOctokit } from '@/lib/github/client'
 
@@ -16,24 +14,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const { taskId } = await params
 
-    // Get the task and verify it belongs to the user
-    const [task] = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+    const supabase = createAdminClient()
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
       .limit(1)
+      .maybeSingle()
 
     if (!task) {
       return NextResponse.json({ success: false, error: 'Task not found' }, { status: 404 })
     }
 
     // Check if task has a branch
-    if (!task.branchName || !task.repoUrl) {
+    if (!task.branch_name || !task.repo_url) {
       return NextResponse.json({ success: false, error: 'Task does not have a branch' }, { status: 400 })
     }
 
-    // Extract owner and repo from repoUrl
-    const repoMatch = task.repoUrl.match(/github\.com\/([^\/]+)\/([^\/\.]+)/)
+    // Extract owner and repo from repo_url
+    const repoMatch = task.repo_url.match(/github\.com\/([^\/]+)\/([^\/\.]+)/)
     if (!repoMatch) {
       return NextResponse.json({ success: false, error: 'Invalid repository URL' }, { status: 400 })
     }
@@ -52,7 +53,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       branchData = await octokit.rest.repos.getBranch({
         owner,
         repo,
-        branch: task.branchName,
+        branch: task.branch_name,
       })
     } catch (branchError) {
       if (branchError && typeof branchError === 'object' && 'status' in branchError && branchError.status === 404) {

@@ -1,5 +1,5 @@
 import { Sandbox } from '@vercel/sandbox'
-import { Writable } from 'stream'
+import { getNodeWritableClass } from '@/lib/sandbox/node-writable'
 import { validateEnvironmentVariables, createAuthenticatedRepoUrl } from './config'
 import { runCommandInSandbox, runInProject, PROJECT_DIR } from './commands'
 import { generateId } from '@/lib/utils/id'
@@ -418,6 +418,7 @@ fi
 
             // Start dev server in detached mode (runs in background) with log capture
             const fullDevCommand = devArgs.length > 0 ? `${devCommand} ${devArgs.join(' ')}` : devCommand
+            const Writable = getNodeWritableClass()
 
             const captureServerStdout = new Writable({
               write(chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void) {

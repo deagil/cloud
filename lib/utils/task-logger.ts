@@ -1,6 +1,4 @@
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { createInfoLog, createCommandLog, createErrorLog, createSuccessLog, LogEntry } from './logging'
 
 export class TaskLogger {
@@ -10,12 +8,8 @@ export class TaskLogger {
     this.taskId = taskId
   }
 
-  /**
-   * Append a log entry to the database immediately
-   */
   async append(type: 'info' | 'command' | 'error' | 'success', message: string): Promise<void> {
     try {
-      // Create the log entry with timestamp
       let logEntry: LogEntry
       switch (type) {
         case 'info':
@@ -34,29 +28,19 @@ export class TaskLogger {
           logEntry = createInfoLog(message)
       }
 
-      // Get current task to preserve existing logs
-      const currentTask = await db.select().from(tasks).where(eq(tasks.id, this.taskId)).limit(1)
-      const existingLogs = currentTask[0]?.logs || []
+      const supabase = createAdminClient()
+      const { data: task } = await supabase.from('tasks').select('logs').eq('id', this.taskId).maybeSingle()
+      const existingLogs = (task?.logs as LogEntry[]) || []
 
-      // Append the new log entry
-      await db
-        .update(tasks)
-        .set({
-          logs: [...existingLogs, logEntry],
-          updatedAt: new Date(),
-        })
-        .where(eq(tasks.id, this.taskId))
-
-      // Task log: ${type.toUpperCase()}: ${message.substring(0, 100)}
+      await supabase
+        .from('tasks')
+        .update({ logs: [...existingLogs, logEntry], updated_at: new Date().toISOString() })
+        .eq('id', this.taskId)
     } catch {
-      // Failed to append log to database
-      // Don't throw - we don't want logging failures to break the main process
+      // Don't throw - logging failures should not break the main process
     }
   }
 
-  /**
-   * Convenience methods for different log types
-   */
   async info(message: string): Promise<void> {
     return this.append('info', message)
   }
@@ -73,67 +57,45 @@ export class TaskLogger {
     return this.append('success', message)
   }
 
-  /**
-   * Update task progress along with a log message
-   */
   async updateProgress(progress: number, message: string): Promise<void> {
     try {
       const logEntry = createInfoLog(message)
+      const supabase = createAdminClient()
+      const { data: task } = await supabase.from('tasks').select('logs').eq('id', this.taskId).maybeSingle()
+      const existingLogs = (task?.logs as LogEntry[]) || []
 
-      // Get current task to preserve existing logs
-      const currentTask = await db.select().from(tasks).where(eq(tasks.id, this.taskId)).limit(1)
-      const existingLogs = currentTask[0]?.logs || []
-
-      // Update both progress and logs
-      await db
-        .update(tasks)
-        .set({
+      await supabase
+        .from('tasks')
+        .update({
           progress,
           logs: [...existingLogs, logEntry],
-          updatedAt: new Date(),
+          updated_at: new Date().toISOString(),
         })
-        .where(eq(tasks.id, this.taskId))
-
-      // Task progress: ${progress}%
+        .eq('id', this.taskId)
     } catch {
       // Failed to update progress
     }
   }
 
-  /**
-   * Update task status along with a log message
-   * Note: completedAt is only set when PR is merged, not when status changes to 'completed'
-   */
   async updateStatus(status: 'pending' | 'processing' | 'completed' | 'error', message?: string): Promise<void> {
     try {
-      const updates: {
-        status: 'pending' | 'processing' | 'completed' | 'error'
-        updatedAt: Date
-        logs?: LogEntry[]
-      } = {
-        status,
-        updatedAt: new Date(),
-      }
+      const supabase = createAdminClient()
+      const updates: Record<string, unknown> = { status, updated_at: new Date().toISOString() }
 
       if (message) {
         const logEntry = createInfoLog(message)
-        const currentTask = await db.select().from(tasks).where(eq(tasks.id, this.taskId)).limit(1)
-        const existingLogs = currentTask[0]?.logs || []
+        const { data: task } = await supabase.from('tasks').select('logs').eq('id', this.taskId).maybeSingle()
+        const existingLogs = (task?.logs as LogEntry[]) || []
         updates.logs = [...existingLogs, logEntry]
       }
 
-      await db.update(tasks).set(updates).where(eq(tasks.id, this.taskId))
-
-      // Task status: ${status}
+      await supabase.from('tasks').update(updates).eq('id', this.taskId)
     } catch {
       // Failed to update status
     }
   }
 }
 
-/**
- * Create a logger instance for a specific task
- */
 export function createTaskLogger(taskId: string): TaskLogger {
   return new TaskLogger(taskId)
 }

@@ -1,15 +1,12 @@
 import { Sandbox } from '@vercel/sandbox'
-import { Writable } from 'stream'
+import { getNodeWritableClass } from '@/lib/sandbox/node-writable'
 import { runCommandInSandbox, runInProject, PROJECT_DIR } from '../commands'
 import { AgentExecutionResult } from '../types'
 import { redactSensitiveInfo } from '@/lib/utils/logging'
 import { TaskLogger } from '@/lib/utils/task-logger'
-import { connectors, taskMessages } from '@/lib/db/schema'
-import { db } from '@/lib/db/client'
-import { eq } from 'drizzle-orm'
+import type { Connector } from '@/lib/db/schema'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { generateId } from '@/lib/utils/id'
-
-type Connector = typeof connectors.$inferSelect
 
 // Helper function to run command and collect logs in project directory
 async function runAndLogCommand(sandbox: Sandbox, command: string, args: string[], logger: TaskLogger) {
@@ -265,12 +262,13 @@ export async function executeClaudeInSandbox(
 
     // Create initial empty agent message in database if streaming
     if (taskId && agentMessageId) {
-      await db.insert(taskMessages).values({
+      const supabase = createAdminClient()
+      await supabase.from('task_messages').insert({
         id: agentMessageId,
-        taskId,
+        task_id: taskId,
         role: 'agent',
         content: '',
-        createdAt: new Date(),
+        created_at: new Date().toISOString(),
       })
     }
 
@@ -307,6 +305,9 @@ export async function executeClaudeInSandbox(
     let accumulatedContent = ''
     let isCompleted = false
 
+    const supabase = createAdminClient()
+    const Writable = getNodeWritableClass()
+
     const captureStdout = new Writable({
       write(chunk, _encoding, callback) {
         const text = chunk.toString()
@@ -335,11 +336,10 @@ export async function executeClaudeInSandbox(
                     accumulatedContent += contentBlock.text
 
                     // Update database with accumulated content
-                    db.update(taskMessages)
-                      .set({
-                        content: accumulatedContent,
-                      })
-                      .where(eq(taskMessages.id, agentMessageId))
+                    supabase
+                      .from('task_messages')
+                      .update({ content: accumulatedContent })
+                      .eq('id', agentMessageId)
                       .then(() => {})
                       .catch((err) => console.error('Failed to update message:', err))
                   }
@@ -375,11 +375,10 @@ export async function executeClaudeInSandbox(
                       accumulatedContent += `\n\n${statusMsg}\n\n`
 
                       // Update database
-                      db.update(taskMessages)
-                        .set({
-                          content: accumulatedContent,
-                        })
-                        .where(eq(taskMessages.id, agentMessageId))
+                      supabase
+                        .from('task_messages')
+                        .update({ content: accumulatedContent })
+                        .eq('id', agentMessageId)
                         .then(() => {})
                         .catch((err) => console.error('Failed to update message:', err))
                     }

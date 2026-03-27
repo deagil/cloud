@@ -1,52 +1,60 @@
 import 'server-only'
 
-import { db } from '@/lib/db/client'
-import { users, accounts } from '@/lib/db/schema'
-import { eq, and } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getServerSession } from '@/lib/session/get-server-session'
-import { getSessionFromReq } from '@/lib/session/server'
+import { getRequestSession } from '@/lib/session/server'
 import { decrypt } from '@/lib/crypto'
+import { decryptStoredGitHubCredential, parseDecryptedGitHubCredential } from '@/lib/github/user-github-credential'
 import type { NextRequest } from 'next/server'
 
-/**
- * Get the GitHub access token for the currently authenticated user
- * Returns null if user is not authenticated or hasn't connected GitHub
- *
- * Checks:
- * 1. Connected GitHub account (accounts table)
- * 2. Primary GitHub account (users table if they signed in with GitHub)
- *
- * @param req - Optional NextRequest for API routes
- */
 export async function getUserGitHubToken(req?: NextRequest): Promise<string | null> {
-  // Get session from request if provided, otherwise use server session
-  const session = req ? await getSessionFromReq(req) : await getServerSession()
+  const session = req ? await getRequestSession(req) : await getServerSession()
 
   if (!session?.user?.id) {
     return null
   }
 
   try {
-    // First check if user has GitHub as a connected account
-    const account = await db
-      .select({ accessToken: accounts.accessToken })
-      .from(accounts)
-      .where(and(eq(accounts.userId, session.user.id), eq(accounts.provider, 'github')))
-      .limit(1)
+    const supabase = createAdminClient()
 
-    if (account[0]?.accessToken) {
-      return decrypt(account[0].accessToken)
+    const { data: cred } = await supabase
+      .from('user_credentials')
+      .select('encrypted_secret')
+      .eq('user_id', session.user.id)
+      .eq('provider', 'github')
+      .maybeSingle()
+
+    if (cred?.encrypted_secret) {
+      const parsed = decryptStoredGitHubCredential(cred.encrypted_secret)
+      if (parsed?.accessToken) return parsed.accessToken
     }
 
-    // Fall back to checking if user signed in with GitHub (primary account)
-    const user = await db
-      .select({ accessToken: users.accessToken })
-      .from(users)
-      .where(and(eq(users.id, session.user.id), eq(users.provider, 'github')))
+    const { data: account } = await supabase
+      .from('accounts')
+      .select('access_token')
+      .eq('user_id', session.user.id)
+      .eq('provider', 'github')
       .limit(1)
+      .maybeSingle()
 
-    if (user[0]?.accessToken) {
-      return decrypt(user[0].accessToken)
+    if (account?.access_token) {
+      const plain = decrypt(account.access_token)
+      const parsed = parseDecryptedGitHubCredential(plain)
+      return parsed?.accessToken ?? plain
+    }
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('access_token')
+      .eq('id', session.user.id)
+      .eq('provider', 'github')
+      .limit(1)
+      .maybeSingle()
+
+    if (user?.access_token) {
+      const plain = decrypt(user.access_token)
+      const parsed = parseDecryptedGitHubCredential(plain)
+      return parsed?.accessToken ?? plain
     }
 
     return null

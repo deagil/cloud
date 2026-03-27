@@ -1,13 +1,41 @@
 'use server'
 
-import { db } from '@/lib/db/client'
-import { connectors, insertConnectorSchema } from '@/lib/db/schema'
-import { nanoid } from 'nanoid'
+import { randomUUID } from 'crypto'
 import { revalidatePath } from 'next/cache'
-import { ZodError } from 'zod'
-import { eq, and } from 'drizzle-orm'
-import { encrypt, decrypt } from '@/lib/crypto'
+import { z, ZodError } from 'zod'
+import { encrypt } from '@/lib/crypto'
+import { mapConnectorRowToConnector } from '@/lib/connectors/map-row'
+import { getProfileByUserId, ensurePersonalWorkspace } from '@/lib/db/profiles'
 import { getServerSession } from '@/lib/session/get-server-session'
+import { createClient } from '@/lib/supabase/server'
+
+function buildEncryptedEnv(
+  env?: Record<string, string>,
+  oauthClientId?: string,
+  oauthClientSecret?: string,
+): string | null {
+  const merged: Record<string, string> = { ...(env ?? {}) }
+  if (oauthClientId) merged.oauthClientId = oauthClientId
+  if (oauthClientSecret) merged.oauthClientSecret = oauthClientSecret
+  if (Object.keys(merged).length === 0) return null
+  return encrypt(JSON.stringify(merged))
+}
+
+const insertConnectorSchema = z.object({
+  id: z.string().optional(),
+  userId: z.string(),
+  name: z.string().min(1, 'Name is required'),
+  description: z.string().optional(),
+  type: z.enum(['local', 'remote']).default('remote'),
+  baseUrl: z.string().url('Must be a valid URL').optional(),
+  oauthClientId: z.string().optional(),
+  oauthClientSecret: z.string().optional(),
+  command: z.string().optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  status: z.enum(['connected', 'disconnected']).default('disconnected'),
+  createdAt: z.date().optional(),
+  updatedAt: z.date().optional(),
+})
 
 type FormState = {
   success: boolean
@@ -37,7 +65,7 @@ export async function createConnector(_: FormState, formData: FormData): Promise
     const envJson = formData.get('env') as string
 
     const connectorData = {
-      id: nanoid(),
+      id: randomUUID(),
       userId: session.user.id,
       name,
       description: description?.trim() || undefined,
@@ -52,19 +80,24 @@ export async function createConnector(_: FormState, formData: FormData): Promise
 
     const validatedData = insertConnectorSchema.parse(connectorData)
 
-    await db.insert(connectors).values({
-      id: validatedData.id!,
-      userId: validatedData.userId,
+    const profile = await getProfileByUserId(session.user.id)
+    const slug = profile?.username?.trim() || session.user.id.slice(0, 8)
+    const workspaceId = await ensurePersonalWorkspace(session.user.id, slug)
+
+    const supabase = await createClient()
+    const { error } = await supabase.from('connectors').insert({
+      id: validatedData.id ?? randomUUID(),
+      workspace_id: workspaceId,
+      created_by: session.user.id,
       name: validatedData.name,
-      description: validatedData.description || null,
       type: validatedData.type,
-      baseUrl: validatedData.baseUrl || null,
-      oauthClientId: validatedData.oauthClientId || null,
-      oauthClientSecret: validatedData.oauthClientSecret ? encrypt(validatedData.oauthClientSecret) : null,
+      base_url: validatedData.baseUrl || null,
       command: validatedData.command || null,
-      env: validatedData.env ? encrypt(JSON.stringify(validatedData.env)) : null,
+      env: buildEncryptedEnv(validatedData.env, validatedData.oauthClientId, validatedData.oauthClientSecret),
       status: validatedData.status,
     })
+
+    if (error) throw new Error(error.message)
 
     revalidatePath('/')
 
@@ -112,10 +145,10 @@ export async function toggleConnectorStatus(id: string, status: 'connected' | 'd
       }
     }
 
-    await db
-      .update(connectors)
-      .set({ status })
-      .where(and(eq(connectors.id, id), eq(connectors.userId, session.user.id)))
+    const supabase = await createClient()
+    const { error } = await supabase.from('connectors').update({ status }).eq('id', id)
+
+    if (error) throw new Error(error.message)
 
     revalidatePath('/')
 
@@ -179,21 +212,20 @@ export async function updateConnector(_: FormState, formData: FormData): Promise
 
     const validatedData = insertConnectorSchema.parse(connectorData)
 
-    await db
-      .update(connectors)
-      .set({
+    const supabase = await createClient()
+    const { error } = await supabase
+      .from('connectors')
+      .update({
         name: validatedData.name,
-        description: validatedData.description || null,
         type: validatedData.type,
-        baseUrl: validatedData.baseUrl || null,
-        oauthClientId: validatedData.oauthClientId || null,
-        oauthClientSecret: validatedData.oauthClientSecret ? encrypt(validatedData.oauthClientSecret) : null,
+        base_url: validatedData.baseUrl || null,
         command: validatedData.command || null,
-        env: validatedData.env ? encrypt(JSON.stringify(validatedData.env)) : null,
+        env: buildEncryptedEnv(validatedData.env, validatedData.oauthClientId, validatedData.oauthClientSecret),
         status: validatedData.status,
-        updatedAt: new Date(),
       })
-      .where(and(eq(connectors.id, id), eq(connectors.userId, session.user.id)))
+      .eq('id', id)
+
+    if (error) throw new Error(error.message)
 
     revalidatePath('/')
 
@@ -241,7 +273,10 @@ export async function deleteConnector(id: string) {
       }
     }
 
-    await db.delete(connectors).where(and(eq(connectors.id, id), eq(connectors.userId, session.user.id)))
+    const supabase = await createClient()
+    const { error } = await supabase.from('connectors').delete().eq('id', id)
+
+    if (error) throw new Error(error.message)
 
     revalidatePath('/')
 
@@ -271,14 +306,12 @@ export async function getConnectors() {
       }
     }
 
-    const userConnectors = await db.select().from(connectors).where(eq(connectors.userId, session.user.id))
+    const supabase = await createClient()
+    const { data: userConnectors, error } = await supabase.from('connectors').select('*')
 
-    // Decrypt sensitive fields
-    const decryptedConnectors = userConnectors.map((connector) => ({
-      ...connector,
-      oauthClientSecret: connector.oauthClientSecret ? decrypt(connector.oauthClientSecret) : null,
-      env: connector.env ? JSON.parse(decrypt(connector.env)) : null,
-    }))
+    if (error) throw new Error(error.message)
+
+    const decryptedConnectors = (userConnectors ?? []).map((row) => mapConnectorRowToConnector(row, session.user.id))
 
     return {
       success: true,

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq, and, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { getOctokit } from '@/lib/github/client'
 
@@ -15,82 +13,58 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const { taskId } = await params
+    const supabase = createAdminClient()
 
-    // Get the task and verify it belongs to the user
-    const [task] = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('pr_number, repo_url')
+      .eq('id', taskId)
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
       .limit(1)
+      .maybeSingle()
 
     if (!task) {
       return NextResponse.json({ success: false, error: 'Task not found' }, { status: 404 })
     }
-
-    // Check if task has a PR
-    if (!task.prNumber || !task.repoUrl) {
+    if (!task.pr_number || !task.repo_url) {
       return NextResponse.json({ success: false, error: 'Task does not have a PR' }, { status: 400 })
     }
 
-    // Extract owner and repo from repoUrl
-    const repoMatch = task.repoUrl.match(/github\.com\/([^\/]+)\/([^\/\.]+)/)
+    const repoMatch = task.repo_url.match(/github\.com\/([^\/]+)\/([^\/\.]+)/)
     if (!repoMatch) {
       return NextResponse.json({ success: false, error: 'Invalid repository URL' }, { status: 400 })
     }
 
     const [, owner, repo] = repoMatch
-
-    // Get GitHub client
     const octokit = await getOctokit()
     if (!octokit.auth) {
       return NextResponse.json({ success: false, error: 'GitHub authentication required' }, { status: 401 })
     }
 
-    // Fetch both issue comments and review comments from GitHub
     const [issueCommentsResponse, reviewCommentsResponse] = await Promise.all([
-      octokit.rest.issues.listComments({
-        owner,
-        repo,
-        issue_number: task.prNumber,
-      }),
-      octokit.rest.pulls.listReviewComments({
-        owner,
-        repo,
-        pull_number: task.prNumber,
-      }),
+      octokit.rest.issues.listComments({ owner, repo, issue_number: task.pr_number }),
+      octokit.rest.pulls.listReviewComments({ owner, repo, pull_number: task.pr_number }),
     ])
 
-    // Combine and format both types of comments
     const allComments = [
-      ...issueCommentsResponse.data.map((comment) => ({
-        id: comment.id,
-        user: {
-          login: comment.user?.login || 'unknown',
-          avatar_url: comment.user?.avatar_url || '',
-        },
-        body: comment.body || '',
-        created_at: comment.created_at,
-        html_url: comment.html_url,
+      ...issueCommentsResponse.data.map((c) => ({
+        id: c.id,
+        user: { login: c.user?.login || 'unknown', avatar_url: c.user?.avatar_url || '' },
+        body: c.body || '',
+        created_at: c.created_at,
+        html_url: c.html_url,
       })),
-      ...reviewCommentsResponse.data.map((comment) => ({
-        id: comment.id,
-        user: {
-          login: comment.user?.login || 'unknown',
-          avatar_url: comment.user?.avatar_url || '',
-        },
-        body: comment.body || '',
-        created_at: comment.created_at,
-        html_url: comment.html_url,
+      ...reviewCommentsResponse.data.map((c) => ({
+        id: c.id,
+        user: { login: c.user?.login || 'unknown', avatar_url: c.user?.avatar_url || '' },
+        body: c.body || '',
+        created_at: c.created_at,
+        html_url: c.html_url,
       })),
-    ]
+    ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
-    // Sort by created_at date (oldest first)
-    allComments.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-
-    return NextResponse.json({
-      success: true,
-      comments: allComments,
-    })
+    return NextResponse.json({ success: true, comments: allComments })
   } catch (error) {
     console.error('Error fetching PR comments:', error)
     return NextResponse.json({ success: false, error: 'Failed to fetch PR comments' }, { status: 500 })

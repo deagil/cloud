@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq, and, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getOctokit } from '@/lib/github/client'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { PROJECT_DIR } from '@/lib/sandbox/commands'
@@ -158,18 +156,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Decode the filename (handles %40 -> @, etc.)
     const filename = decodeURIComponent(rawFilename)
 
-    // Get task from database and verify ownership (exclude soft-deleted)
-    const [task] = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+    const supabase = createAdminClient()
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
       .limit(1)
+      .maybeSingle()
 
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
 
-    if (!task.branchName || !task.repoUrl) {
+    if (!task.branch_name || !task.repo_url) {
       return NextResponse.json({ error: 'Task does not have branch or repository information' }, { status: 400 })
     }
 
@@ -185,7 +186,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // Parse GitHub repository URL to get owner and repo
-    const githubMatch = task.repoUrl.match(/github\.com\/([^\/]+)\/([^\/\.]+)/)
+    const githubMatch = task.repo_url.match(/github\.com\/([^\/]+)\/([^\/\.]+)/)
     if (!githubMatch) {
       return NextResponse.json({ error: 'Invalid GitHub repository URL' }, { status: 400 })
     }
@@ -224,13 +225,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       if (mode === 'local') {
         // Get old content from GitHub (remote branch)
         if (!isNodeModulesFile) {
-          const remoteResult = await getFileContent(octokit, owner, repo, filename, task.branchName, isImage)
+          const remoteResult = await getFileContent(octokit, owner, repo, filename, task.branch_name, isImage)
           oldContent = remoteResult.content
           isBase64 = remoteResult.isBase64
         }
 
         // Get new content from sandbox (local)
-        if (task.sandboxId) {
+        if (task.sandbox_id) {
           try {
             const { getSandbox } = await import('@/lib/sandbox/sandbox-registry')
             const { Sandbox } = await import('@vercel/sandbox')
@@ -245,7 +246,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
               if (sandboxToken && teamId && projectId) {
                 sandbox = await Sandbox.get({
-                  sandboxId: task.sandboxId,
+                  sandboxId: task.sandbox_id,
                   teamId,
                   projectId,
                   token: sandboxToken,
@@ -285,7 +286,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         let content = ''
 
         // For node_modules files, read directly from sandbox (they're not in GitHub)
-        if (isNodeModulesFile && task.sandboxId) {
+        if (isNodeModulesFile && task.sandbox_id) {
           try {
             const { getSandbox } = await import('@/lib/sandbox/sandbox-registry')
             const { Sandbox } = await import('@vercel/sandbox')
@@ -300,7 +301,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
               if (sandboxToken && teamId && projectId) {
                 sandbox = await Sandbox.get({
-                  sandboxId: task.sandboxId,
+                  sandboxId: task.sandbox_id,
                   teamId,
                   projectId,
                   token: sandboxToken,
@@ -325,7 +326,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           }
         } else {
           // For regular files, try GitHub first
-          const result = await getFileContent(octokit, owner, repo, filename, task.branchName, isImage)
+          const result = await getFileContent(octokit, owner, repo, filename, task.branch_name, isImage)
           content = result.content
           isBase64 = result.isBase64
           // If we got content from GitHub, mark as found
@@ -335,7 +336,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         }
 
         // If file not found in GitHub and we have a sandbox, try reading from sandbox (fallback for new files)
-        if (!fileFound && !isImage && !isNodeModulesFile && task.sandboxId) {
+        if (!fileFound && !isImage && !isNodeModulesFile && task.sandbox_id) {
           try {
             const { getSandbox } = await import('@/lib/sandbox/sandbox-registry')
             const { Sandbox } = await import('@vercel/sandbox')
@@ -350,7 +351,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
               if (sandboxToken && teamId && projectId) {
                 sandbox = await Sandbox.get({
-                  sandboxId: task.sandboxId,
+                  sandboxId: task.sandbox_id,
                   teamId,
                   projectId,
                   token: sandboxToken,

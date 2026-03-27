@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from '@/lib/session/get-server-session'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq, and, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getOctokit } from '@/lib/github/client'
 
 // Helper function to convert Vercel feedback URL to actual deployment URL
@@ -23,26 +21,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const { taskId } = await params
 
-    // Get task from database
-    const taskResult = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+    const supabase = createAdminClient()
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
       .limit(1)
-
-    const task = taskResult[0]
+      .maybeSingle()
 
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
 
     // Return cached preview URL if available
-    if (task.previewUrl) {
-      const previewUrl = convertFeedbackUrlToDeploymentUrl(task.previewUrl)
+    if (task.preview_url) {
+      const previewUrl = convertFeedbackUrlToDeploymentUrl(task.preview_url)
 
       // If the URL was converted, update it in the database
-      if (previewUrl !== task.previewUrl) {
-        await db.update(tasks).set({ previewUrl }).where(eq(tasks.id, taskId))
+      if (previewUrl !== task.preview_url) {
+        await supabase.from('tasks').update({ preview_url: previewUrl }).eq('id', taskId)
       }
 
       return NextResponse.json({
@@ -56,7 +55,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // Return early if no branch or repo
-    if (!task.branchName || !task.repoUrl) {
+    if (!task.branch_name || !task.repo_url) {
       return NextResponse.json({
         success: true,
         data: {
@@ -67,7 +66,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // Parse GitHub repository URL to get owner and repo
-    const githubMatch = task.repoUrl.match(/github\.com\/([^\/]+)\/([^\/\.]+)/)
+    const githubMatch = task.repo_url.match(/github\.com\/([^\/]+)\/([^\/\.]+)/)
     if (!githubMatch) {
       return NextResponse.json({
         success: true,
@@ -100,7 +99,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         const { data: branch } = await octokit.rest.repos.getBranch({
           owner,
           repo,
-          branch: task.branchName,
+          branch: task.branch_name,
         })
         latestCommitSha = branch.commit.sha
       } catch (branchError) {
@@ -185,7 +184,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
           if (previewUrl) {
             // Store the preview URL in the database
-            await db.update(tasks).set({ previewUrl }).where(eq(tasks.id, taskId))
+            await supabase.from('tasks').update({ preview_url: previewUrl }).eq('id', taskId)
 
             return NextResponse.json({
               success: true,
@@ -208,7 +207,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         const { data: deployments } = await octokit.rest.repos.listDeployments({
           owner,
           repo,
-          ref: task.branchName,
+          ref: task.branch_name,
           per_page: 10,
         })
 
@@ -237,7 +236,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
                     // Convert feedback URL to actual deployment URL if needed
                     previewUrl = convertFeedbackUrlToDeploymentUrl(previewUrl)
                     // Store the preview URL in the database
-                    await db.update(tasks).set({ previewUrl }).where(eq(tasks.id, taskId))
+                    await supabase.from('tasks').update({ preview_url: previewUrl }).eq('id', taskId)
 
                     return NextResponse.json({
                       success: true,
@@ -278,7 +277,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             // Convert feedback URL to actual deployment URL if needed
             const previewUrl = convertFeedbackUrlToDeploymentUrl(vercelStatus.target_url)
             // Store the preview URL in the database
-            await db.update(tasks).set({ previewUrl }).where(eq(tasks.id, taskId))
+            await supabase.from('tasks').update({ preview_url: previewUrl }).eq('id', taskId)
 
             return NextResponse.json({
               success: true,

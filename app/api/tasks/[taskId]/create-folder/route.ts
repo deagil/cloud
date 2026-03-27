@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq, and, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { PROJECT_DIR } from '@/lib/sandbox/commands'
 
@@ -20,18 +18,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ success: false, error: 'Foldername is required' }, { status: 400 })
     }
 
-    // Get task from database and verify ownership (exclude soft-deleted)
-    const [task] = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+    const supabase = createAdminClient()
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
       .limit(1)
+      .maybeSingle()
 
     if (!task) {
       return NextResponse.json({ success: false, error: 'Task not found' }, { status: 404 })
     }
 
-    if (!task.sandboxId) {
+    if (!task.sandbox_id) {
       return NextResponse.json({ success: false, error: 'Sandbox not available' }, { status: 400 })
     }
 
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       if (sandboxToken && teamId && projectId) {
         sandbox = await Sandbox.get({
-          sandboxId: task.sandboxId,
+          sandboxId: task.sandbox_id,
           teamId,
           projectId,
           token: sandboxToken,

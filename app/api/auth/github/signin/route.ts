@@ -1,45 +1,39 @@
-import { type NextRequest } from 'next/server'
+import { type NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { getSessionFromReq } from '@/lib/session/server'
+import { safeOAuthReturnPath } from '@/lib/auth/oauth-return-path'
+import { getGitHubOAuthClientId } from '@/lib/github/oauth-client-id'
+import { getRequestSession } from '@/lib/session/server'
 import { isRelativeUrl } from '@/lib/utils/is-relative-url'
 import { generateState } from 'arctic'
 
+function oauthCookieOptions() {
+  return {
+    path: '/',
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 60 * 10,
+    sameSite: 'lax' as const,
+  }
+}
+
 export async function GET(req: NextRequest): Promise<Response> {
-  // Check if user is authenticated with Vercel first
-  const session = await getSessionFromReq(req)
+  const session = await getRequestSession(req)
   if (!session?.user) {
-    return Response.redirect(new URL('/', req.url))
+    return NextResponse.redirect(new URL('/', req.url))
   }
 
-  const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID
+  const clientId = getGitHubOAuthClientId()
   const redirectUri = `${req.nextUrl.origin}/api/auth/github/callback`
 
   if (!clientId) {
-    return Response.redirect(new URL('/?error=github_not_configured', req.url))
+    return NextResponse.redirect(new URL('/?error=github_not_configured', req.url))
   }
 
   const state = generateState()
-  const store = await cookies()
-  const redirectTo = isRelativeUrl(req.nextUrl.searchParams.get('next') ?? '/')
-    ? (req.nextUrl.searchParams.get('next') ?? '/')
-    : '/'
+  const redirectTo = safeOAuthReturnPath(
+    isRelativeUrl(req.nextUrl.searchParams.get('next') ?? '/') ? (req.nextUrl.searchParams.get('next') ?? '/') : '/',
+  )
 
-  // Store state and redirect URL
-  for (const [key, value] of [
-    [`github_oauth_redirect_to`, redirectTo],
-    [`github_oauth_state`, state],
-    [`github_oauth_user_id`, session.user.id], // Store Vercel user ID
-  ]) {
-    store.set(key, value, {
-      path: '/',
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-      maxAge: 60 * 10, // 10 minutes
-      sameSite: 'lax',
-    })
-  }
-
-  // Build GitHub authorization URL
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -48,19 +42,24 @@ export async function GET(req: NextRequest): Promise<Response> {
   })
 
   const url = `https://github.com/login/oauth/authorize?${params.toString()}`
+  const res = NextResponse.redirect(url)
+  const opts = oauthCookieOptions()
 
-  // Redirect directly to GitHub
-  return Response.redirect(url)
+  res.cookies.set('github_oauth_redirect_to', redirectTo, opts)
+  res.cookies.set('github_oauth_state', state, opts)
+  res.cookies.set('github_oauth_user_id', session.user.id, opts)
+
+  return res
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
   // Check if user is authenticated with Vercel first
-  const session = await getSessionFromReq(req)
+  const session = await getRequestSession(req)
   if (!session?.user) {
     return Response.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
-  const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID
+  const clientId = getGitHubOAuthClientId()
   const redirectUri = `${req.nextUrl.origin}/api/auth/github/callback`
 
   if (!clientId) {
@@ -69,26 +68,19 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const state = generateState()
   const store = await cookies()
-  const redirectTo = isRelativeUrl(req.nextUrl.searchParams.get('next') ?? '/')
-    ? (req.nextUrl.searchParams.get('next') ?? '/')
-    : '/'
+  const redirectTo = safeOAuthReturnPath(
+    isRelativeUrl(req.nextUrl.searchParams.get('next') ?? '/') ? (req.nextUrl.searchParams.get('next') ?? '/') : '/',
+  )
 
-  // Store state and redirect URL
+  const opts = oauthCookieOptions()
   for (const [key, value] of [
-    [`github_oauth_redirect_to`, redirectTo],
-    [`github_oauth_state`, state],
-    [`github_oauth_user_id`, session.user.id], // Store Vercel user ID
-  ]) {
-    store.set(key, value, {
-      path: '/',
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-      maxAge: 60 * 10, // 10 minutes
-      sameSite: 'lax',
-    })
+    ['github_oauth_redirect_to', redirectTo],
+    ['github_oauth_state', state],
+    ['github_oauth_user_id', session.user.id],
+  ] as const) {
+    store.set(key, value, opts)
   }
 
-  // Build GitHub authorization URL
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,

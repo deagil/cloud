@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { Sandbox } from '@vercel/sandbox'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { runCommandInSandbox, runInProject, PROJECT_DIR } from '@/lib/sandbox/commands'
 import { detectPackageManager } from '@/lib/sandbox/package-manager'
 import { createTaskLogger } from '@/lib/utils/task-logger'
+import { getNodeWritableClass } from '@/lib/sandbox/node-writable'
 
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ taskId: string }> }) {
   try {
@@ -18,25 +17,31 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     const { taskId } = await params
 
     // Get the task
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+    const supabase = createAdminClient()
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('id, user_id, sandbox_id')
+      .eq('id', taskId)
+      .limit(1)
+      .maybeSingle()
 
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
 
     // Verify ownership
-    if (task.userId !== session.user.id) {
+    if (task.user_id !== session.user.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 
     // Check if sandbox is still alive
-    if (!task.sandboxId) {
+    if (!task.sandbox_id) {
       return NextResponse.json({ error: 'Sandbox is not active' }, { status: 400 })
     }
 
     // Reconnect to the sandbox
     const sandbox = await Sandbox.get({
-      sandboxId: task.sandboxId,
+      sandboxId: task.sandbox_id,
       teamId: process.env.SANDBOX_VERCEL_TEAM_ID!,
       projectId: process.env.SANDBOX_VERCEL_PROJECT_ID!,
       token: process.env.SANDBOX_VERCEL_TOKEN!,
@@ -144,8 +149,7 @@ export default mergeConfig(userConfig, defineConfig({
     // Start dev server in detached mode with log capture
     const fullDevCommand = devArgs.length > 0 ? `${devCommand} ${devArgs.join(' ')}` : devCommand
 
-    // Import Writable for stream capture
-    const { Writable } = await import('stream')
+    const Writable = getNodeWritableClass()
 
     const captureServerStdout = new Writable({
       write(chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void) {

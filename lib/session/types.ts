@@ -1,6 +1,8 @@
+export type AuthProvider = 'github' | 'vercel' | 'email'
+
 export interface SessionUserInfo {
   user: User | undefined
-  authProvider?: 'github' | 'vercel' // Which provider the user signed in with
+  authProvider?: AuthProvider
 }
 
 export interface Tokens {
@@ -11,11 +13,11 @@ export interface Tokens {
 
 export interface Session {
   created: number
-  authProvider: 'github' | 'vercel' // Which provider the user signed in with
+  authProvider: AuthProvider
   user: User
 }
 
-interface User {
+export interface User {
   id: string // Internal user ID (from users table)
   username: string
   email: string | undefined

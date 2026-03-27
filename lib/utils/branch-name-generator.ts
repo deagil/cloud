@@ -51,16 +51,21 @@ Return ONLY the branch name, nothing else.`
     const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
     const nanoid = customAlphabet(alphabet, 6)
     const hash = nanoid()
-    const branchName = `${baseBranchName}-${hash}`
+    const suffix = `-${hash}`
 
-    // Validate the base branch name
-    const branchNameRegex = /^[a-z0-9-\/]+$/
-    if (!branchNameRegex.test(baseBranchName)) {
-      throw new Error(`Generated branch name contains invalid characters: ${baseBranchName}`)
-    }
+    // Sanitize and fit Git branch name rules; model output can exceed length or include bad chars
+    const sanitizedBase = baseBranchName
+      .toLowerCase()
+      .replace(/[^a-z0-9-/]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '')
+
+    const maxBaseLen = Math.max(1, 50 - suffix.length)
+    const trimmedBase = (sanitizedBase.slice(0, maxBaseLen).replace(/-+$/g, '') || 'agent').slice(0, maxBaseLen)
+    let branchName = `${trimmedBase}${suffix}`
 
     if (branchName.length > 50) {
-      throw new Error('Generated branch name is too long')
+      branchName = branchName.slice(0, 50)
     }
 
     return branchName

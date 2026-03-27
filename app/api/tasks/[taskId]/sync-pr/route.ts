@@ -1,78 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq, and, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { getPullRequestStatus } from '@/lib/github/client'
 
 interface RouteParams {
-  params: Promise<{
-    taskId: string
-  }>
+  params: Promise<{ taskId: string }>
 }
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const session = await getServerSession()
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { taskId } = await params
+    const supabase = createAdminClient()
 
-    // Get the task
-    const [task] = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('repo_url, pr_number')
+      .eq('id', taskId)
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
       .limit(1)
+      .maybeSingle()
 
-    if (!task) {
-      return NextResponse.json({ error: 'Task not found' }, { status: 404 })
-    }
-
-    // Validate task has required fields
-    if (!task.repoUrl || !task.prNumber) {
+    if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+    if (!task.repo_url || !task.pr_number)
       return NextResponse.json({ error: 'Task does not have repository or PR information' }, { status: 400 })
-    }
 
-    // Get PR status from GitHub
-    const result = await getPullRequestStatus({
-      repoUrl: task.repoUrl,
-      prNumber: task.prNumber,
-    })
-
-    if (!result.success || !result.status) {
+    const result = await getPullRequestStatus({ repoUrl: task.repo_url, prNumber: task.pr_number })
+    if (!result.success || !result.status)
       return NextResponse.json({ error: result.error || 'Failed to get PR status' }, { status: 500 })
+
+    const updateData: Record<string, unknown> = {
+      pr_status: result.status,
+      pr_merge_commit_sha: result.mergeCommitSha || null,
+      updated_at: new Date().toISOString(),
     }
+    if (result.status === 'merged') updateData.completed_at = new Date().toISOString()
 
-    // Update task with current PR status from GitHub
-    // Set completedAt when PR is merged
-    const updateData: {
-      prStatus: 'open' | 'closed' | 'merged'
-      prMergeCommitSha: string | null
-      completedAt?: Date
-      updatedAt: Date
-    } = {
-      prStatus: result.status,
-      prMergeCommitSha: result.mergeCommitSha || null,
-      updatedAt: new Date(),
-    }
+    await supabase.from('tasks').update(updateData).eq('id', taskId)
 
-    // Set completedAt timestamp when PR is merged
-    if (result.status === 'merged') {
-      updateData.completedAt = new Date()
-    }
-
-    await db.update(tasks).set(updateData).where(eq(tasks.id, taskId))
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        status: result.status,
-        mergeCommitSha: result.mergeCommitSha,
-      },
-    })
+    return NextResponse.json({ success: true, data: { status: result.status, mergeCommitSha: result.mergeCommitSha } })
   } catch (error) {
     console.error('Error syncing pull request status:', error)
     return NextResponse.json({ error: 'Failed to sync pull request status' }, { status: 500 })

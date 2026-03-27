@@ -146,7 +146,7 @@ export function SignOut({ user, authProvider }: Pick<Session, 'user' | 'authProv
         </DropdownMenuItem>
 
         {/* Only show GitHub Connect/Disconnect for Vercel users when GitHub is enabled */}
-        {authProvider === 'vercel' && hasGitHub && (
+        {(authProvider === 'vercel' || authProvider === 'email') && hasGitHub && (
           <>
             {githubConnection.connected ? (
               <DropdownMenuItem onClick={handleGitHubDisconnect} className="cursor-pointer">

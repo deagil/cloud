@@ -39,23 +39,24 @@ export async function generateMetadata({ params }: TaskPageProps): Promise<Metad
 
   if (session?.user?.id) {
     try {
-      const { db } = await import('@/lib/db/client')
-      const { tasks } = await import('@/lib/db/schema')
-      const { eq, and, isNull } = await import('drizzle-orm')
-
-      const task = await db
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+      const { createAdminClient } = await import('@/lib/supabase/admin')
+      const supabase = createAdminClient()
+      const { data: task } = await supabase
+        .from('tasks')
+        .select('title, prompt')
+        .eq('id', taskId)
+        .eq('user_id', session.user.id)
+        .is('deleted_at', null)
         .limit(1)
+        .maybeSingle()
 
-      if (task[0]) {
+      if (task) {
         // Use title if available, otherwise use truncated prompt
-        if (task[0].title) {
-          pageTitle = task[0].title
-        } else if (task[0].prompt) {
+        if (task.title) {
+          pageTitle = task.title
+        } else if (task.prompt) {
           // Truncate prompt to 60 characters
-          pageTitle = task[0].prompt.length > 60 ? task[0].prompt.slice(0, 60) + '...' : task[0].prompt
+          pageTitle = task.prompt.length > 60 ? task.prompt.slice(0, 60) + '...' : task.prompt
         }
       }
     } catch (error) {

@@ -1,17 +1,10 @@
 import 'server-only'
 
-import { db } from '@/lib/db/client'
-import { keys } from '@/lib/db/schema'
-import { eq, and } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { decrypt } from '@/lib/crypto'
+import { USER_AI_KEY_PROVIDERS, type UserAiKeyProvider } from '@/lib/api-keys/providers'
 
-type Provider = 'openai' | 'gemini' | 'cursor' | 'anthropic' | 'aigateway'
-
-/**
- * Get API keys for the currently authenticated user
- * Returns user's keys if available, otherwise falls back to system env vars
- */
 export async function getUserApiKeys(): Promise<{
   OPENAI_API_KEY: string | undefined
   GEMINI_API_KEY: string | undefined
@@ -21,7 +14,6 @@ export async function getUserApiKeys(): Promise<{
 }> {
   const session = await getServerSession()
 
-  // Default to system keys
   const apiKeys = {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
@@ -35,12 +27,16 @@ export async function getUserApiKeys(): Promise<{
   }
 
   try {
-    const userKeys = await db.select().from(keys).where(eq(keys.userId, session.user.id))
+    const supabase = createAdminClient()
+    const { data: rows } = await supabase
+      .from('user_credentials')
+      .select('provider, encrypted_secret')
+      .eq('user_id', session.user.id)
+      .in('provider', [...USER_AI_KEY_PROVIDERS])
 
-    userKeys.forEach((key) => {
-      const decryptedValue = decrypt(key.value)
-
-      switch (key.provider) {
+    for (const row of rows ?? []) {
+      const decryptedValue = decrypt(row.encrypted_secret)
+      switch (row.provider as UserAiKeyProvider) {
         case 'openai':
           apiKeys.OPENAI_API_KEY = decryptedValue
           break
@@ -57,24 +53,18 @@ export async function getUserApiKeys(): Promise<{
           apiKeys.AI_GATEWAY_API_KEY = decryptedValue
           break
       }
-    })
-  } catch (error) {
-    console.error('Error fetching user API keys:', error)
-    // Fall back to system keys on error
+    }
+  } catch {
+    console.error('Error fetching user API keys')
   }
 
   return apiKeys
 }
 
-/**
- * Get a specific API key for a provider
- * Returns user's key if available, otherwise falls back to system env var
- */
-export async function getUserApiKey(provider: Provider): Promise<string | undefined> {
+export async function getUserApiKey(provider: UserAiKeyProvider): Promise<string | undefined> {
   const session = await getServerSession()
 
-  // Default to system key
-  const systemKeys = {
+  const systemKeys: Record<UserAiKeyProvider, string | undefined> = {
     openai: process.env.OPENAI_API_KEY,
     gemini: process.env.GEMINI_API_KEY,
     cursor: process.env.CURSOR_API_KEY,
@@ -87,17 +77,19 @@ export async function getUserApiKey(provider: Provider): Promise<string | undefi
   }
 
   try {
-    const userKey = await db
-      .select({ value: keys.value })
-      .from(keys)
-      .where(and(eq(keys.userId, session.user.id), eq(keys.provider, provider)))
-      .limit(1)
+    const supabase = createAdminClient()
+    const { data } = await supabase
+      .from('user_credentials')
+      .select('encrypted_secret')
+      .eq('user_id', session.user.id)
+      .eq('provider', provider)
+      .maybeSingle()
 
-    if (userKey[0]?.value) {
-      return decrypt(userKey[0].value)
+    if (data?.encrypted_secret) {
+      return decrypt(data.encrypted_secret)
     }
-  } catch (error) {
-    console.error('Error fetching user API key:', error)
+  } catch {
+    console.error('Error fetching user API key')
   }
 
   return systemKeys[provider]

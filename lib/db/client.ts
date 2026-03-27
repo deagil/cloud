@@ -1,18 +1,16 @@
-import { drizzle } from 'drizzle-orm/postgres-js'
-import postgres from 'postgres'
-import * as schema from './schema'
-
-let _db: ReturnType<typeof drizzle> | null = null
-
-export const db = new Proxy({} as ReturnType<typeof drizzle>, {
-  get(target, prop) {
-    if (!_db) {
-      if (!process.env.POSTGRES_URL) {
-        throw new Error('POSTGRES_URL environment variable is required')
-      }
-      const client = postgres(process.env.POSTGRES_URL)
-      _db = drizzle(client, { schema })
-    }
-    return Reflect.get(_db, prop)
+/**
+ * @deprecated Migration stub — all imports of `db` from this file will fail at runtime.
+ * Migrate to lib/supabase/server.ts or lib/supabase/admin.ts.
+ * This stub compiles without errors so migration can happen route by route (Phase 2).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const db: any = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error(
+        '[Migration] lib/db/client.ts is removed. Use lib/supabase/server.ts or lib/supabase/admin.ts instead.',
+      )
+    },
   },
-})
+)

@@ -58,14 +58,8 @@ const AGENT_MODELS = {
     { value: 'gpt-5', label: 'GPT-5' },
   ],
   cursor: [
+    { value: 'composer-2', label: 'Composer' },
     { value: 'auto', label: 'Auto' },
-    { value: 'composer-1', label: 'Composer' },
-    { value: 'sonnet-4.5', label: 'Sonnet 4.5' },
-    { value: 'sonnet-4.5-thinking', label: 'Sonnet 4.5 Thinking' },
-    { value: 'gpt-5', label: 'GPT-5' },
-    { value: 'gpt-5-codex', label: 'GPT-5 Codex' },
-    { value: 'opus-4.1', label: 'Opus 4.1' },
-    { value: 'grok', label: 'Grok' },
   ],
   gemini: [
     { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },

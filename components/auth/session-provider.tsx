@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { usePathname } from 'next/navigation'
 import { useSetAtom } from 'jotai'
 import { sessionAtom, sessionInitializedAtom } from '@/lib/atoms/session'
 import { githubConnectionAtom, githubConnectionInitializedAtom } from '@/lib/atoms/github-connection'
@@ -8,6 +9,7 @@ import type { SessionUserInfo } from '@/lib/session/types'
 import type { GitHubConnection } from '@/lib/atoms/github-connection'
 
 export function SessionProvider() {
+  const pathname = usePathname()
   const setSession = useSetAtom(sessionAtom)
   const setInitialized = useSetAtom(sessionInitializedAtom)
   const setGitHubConnection = useSetAtom(githubConnectionAtom)
@@ -57,7 +59,7 @@ export function SessionProvider() {
       clearInterval(interval)
       window.removeEventListener('focus', handleFocus)
     }
-  }, [setSession, setInitialized, setGitHubConnection, setGitHubInitialized])
+  }, [pathname, setSession, setInitialized, setGitHubConnection, setGitHubInitialized])
 
   return null
 }

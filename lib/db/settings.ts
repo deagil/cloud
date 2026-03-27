@@ -1,6 +1,4 @@
-import { db } from './client'
-import { settings } from './schema'
-import { eq, and } from 'drizzle-orm'
+import { createClient } from '@/lib/supabase/server'
 import { MAX_MESSAGES_PER_DAY, MAX_SANDBOX_DURATION } from '@/lib/constants'
 
 /**
@@ -21,13 +19,16 @@ export async function getSetting(
     return defaultValue
   }
 
-  const userSetting = await db
-    .select()
-    .from(settings)
-    .where(and(eq(settings.userId, userId), eq(settings.key, key)))
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('user_id', userId)
+    .eq('key', key)
     .limit(1)
+    .single()
 
-  return userSetting[0]?.value ?? defaultValue
+  return data?.value ?? defaultValue
 }
 
 /**

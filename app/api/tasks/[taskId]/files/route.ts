@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq, and, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getOctokit } from '@/lib/github/client'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { PROJECT_DIR } from '@/lib/sandbox/commands'
@@ -35,12 +33,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const searchParams = request.nextUrl.searchParams
     const mode = searchParams.get('mode') || 'remote' // 'local', 'remote', 'all', or 'all-local'
 
-    // Get task from database and verify ownership (exclude soft-deleted)
-    const [task] = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+    const supabase = createAdminClient()
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
       .limit(1)
+      .maybeSingle()
 
     if (!task) {
       const response = NextResponse.json({ success: false, error: 'Task not found' }, { status: 404 })
@@ -49,23 +50,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // Check if task has a branch assigned
-    if (!task.branchName) {
+    if (!task.branch_name) {
       return NextResponse.json({
         success: true,
         files: [],
         fileTree: {},
-        branchName: null,
+        branchName: null as null,
       })
     }
 
     // Extract owner and repo from the repository URL
-    const repoUrl = task.repoUrl
+    const repoUrl = task.repo_url
     if (!repoUrl) {
       return NextResponse.json({
         success: true,
         files: [],
         fileTree: {},
-        branchName: task.branchName,
+        branchName: task.branch_name,
       })
     }
 
@@ -100,7 +101,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     // If mode is 'local', fetch changed files from the sandbox
     if (mode === 'local') {
-      if (!task.sandboxId) {
+      if (!task.sandbox_id) {
         const response = NextResponse.json(
           {
             success: false,
@@ -126,7 +127,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
           if (sandboxToken && teamId && projectId) {
             sandbox = await Sandbox.get({
-              sandboxId: task.sandboxId,
+              sandboxId: task.sandbox_id,
               teamId,
               projectId,
               token: sandboxToken,
@@ -139,7 +140,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             success: true,
             files: [],
             fileTree: {},
-            branchName: task.branchName,
+            branchName: task.branch_name,
             message: 'Sandbox not found',
           })
         }
@@ -156,7 +157,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             success: true,
             files: [],
             fileTree: {},
-            branchName: task.branchName,
+            branchName: task.branch_name,
             message: 'Failed to get local changes',
           })
         }
@@ -170,10 +171,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         // First, check if remote branch exists to determine comparison base
         const lsRemoteResult = await sandbox.runCommand({
           cmd: 'git',
-          args: ['ls-remote', '--heads', 'origin', task.branchName],
+          args: ['ls-remote', '--heads', 'origin', task.branch_name],
           cwd: PROJECT_DIR,
         })
-        const remoteBranchRef = `origin/${task.branchName}`
+        const remoteBranchRef = `origin/${task.branch_name}`
         const checkRemoteResult = await sandbox.runCommand({
           cmd: 'git',
           args: ['rev-parse', '--verify', remoteBranchRef],
@@ -292,13 +293,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         if (is410Error) {
           // Clear sandbox info from database since it's no longer running
           try {
-            await db
-              .update(tasks)
-              .set({
-                sandboxId: null,
-                sandboxUrl: null,
-              })
-              .where(eq(tasks.id, taskId))
+            const clearClient = createAdminClient()
+            const { error: clearError } = await clearClient
+              .from('tasks')
+              .update({ sandbox_id: null, sandbox_url: null })
+              .eq('id', taskId)
+            if (clearError) {
+              console.error('Error clearing sandbox info:', clearError)
+            }
 
             // Also remove from registry
             const { unregisterSandbox } = await import('@/lib/sandbox/sandbox-registry')
@@ -328,7 +330,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       }
     } else if (mode === 'all-local') {
       // Get all files from local sandbox using find command
-      if (!task.sandboxId) {
+      if (!task.sandbox_id) {
         const response = NextResponse.json(
           {
             success: false,
@@ -354,7 +356,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
           if (sandboxToken && teamId && projectId) {
             sandbox = await Sandbox.get({
-              sandboxId: task.sandboxId,
+              sandboxId: task.sandbox_id,
               teamId,
               projectId,
               token: sandboxToken,
@@ -367,7 +369,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             success: true,
             files: [],
             fileTree: {},
-            branchName: task.branchName,
+            branchName: task.branch_name,
             message: 'Sandbox not found',
           })
         }
@@ -407,7 +409,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             success: true,
             files: [],
             fileTree: {},
-            branchName: task.branchName,
+            branchName: task.branch_name,
             message: 'Failed to list files',
           })
         }
@@ -497,13 +499,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         if (is410Error) {
           // Clear sandbox info from database since it's no longer running
           try {
-            await db
-              .update(tasks)
-              .set({
-                sandboxId: null,
-                sandboxUrl: null,
-              })
-              .where(eq(tasks.id, taskId))
+            const clearClient = createAdminClient()
+            const { error: clearError } = await clearClient
+              .from('tasks')
+              .update({ sandbox_id: null, sandbox_url: null })
+              .eq('id', taskId)
+            if (clearError) {
+              console.error('Error clearing sandbox info:', clearError)
+            }
 
             // Also remove from registry
             const { unregisterSandbox } = await import('@/lib/sandbox/sandbox-registry')
@@ -536,7 +539,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         const treeResponse = await octokit.rest.git.getTree({
           owner,
           repo,
-          tree_sha: task.branchName,
+          tree_sha: task.branch_name,
           recursive: 'true',
         })
 
@@ -556,7 +559,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             success: true,
             files: [],
             fileTree: {},
-            branchName: task.branchName,
+            branchName: task.branch_name,
             message: 'Branch not found or still being created',
           })
         }
@@ -577,7 +580,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           await octokit.rest.repos.getBranch({
             owner,
             repo,
-            branch: task.branchName,
+            branch: task.branch_name,
           })
         } catch (branchError: unknown) {
           if (branchError && typeof branchError === 'object' && 'status' in branchError && branchError.status === 404) {
@@ -586,7 +589,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
               success: true,
               files: [],
               fileTree: {},
-              branchName: task.branchName,
+              branchName: task.branch_name,
               message: 'Branch is being created...',
             })
           } else {
@@ -601,7 +604,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             owner,
             repo,
             base: 'main',
-            head: task.branchName,
+            head: task.branch_name,
           })
         } catch (mainError: unknown) {
           if (mainError && typeof mainError === 'object' && 'status' in mainError && mainError.status === 404) {
@@ -611,7 +614,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
                 owner,
                 repo,
                 base: 'master',
-                head: task.branchName,
+                head: task.branch_name,
               })
             } catch (masterError: unknown) {
               if (
@@ -625,7 +628,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
                   success: true,
                   files: [],
                   fileTree: {},
-                  branchName: task.branchName,
+                  branchName: task.branch_name,
                   message: 'No base branch found for comparison',
                 })
               } else {
@@ -655,7 +658,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             success: true,
             files: [],
             fileTree: {},
-            branchName: task.branchName,
+            branchName: task.branch_name,
             message: 'Branch not found or still being created',
           })
         }
@@ -681,7 +684,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       success: true,
       files,
       fileTree,
-      branchName: task.branchName,
+      branchName: task.branch_name,
     })
     // Don't cache file listings as they change frequently
     response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate')

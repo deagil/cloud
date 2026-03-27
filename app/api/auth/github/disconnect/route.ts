@@ -1,19 +1,16 @@
 import { type NextRequest } from 'next/server'
-import { getSessionFromReq } from '@/lib/session/server'
-import { db } from '@/lib/db/client'
-import { accounts } from '@/lib/db/schema'
-import { eq, and } from 'drizzle-orm'
+import { getRequestSession } from '@/lib/session/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function POST(req: NextRequest) {
-  const session = await getSessionFromReq(req)
+  const session = await getRequestSession(req)
 
   if (!session?.user) {
-    console.log('Disconnect GitHub: No session found')
     return Response.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
   if (!session.user.id) {
-    console.error('Session user.id is undefined. Session:', session)
+    console.error('Disconnect GitHub: invalid session')
     return Response.json({ error: 'Invalid session - user ID missing' }, { status: 400 })
   }
 
@@ -22,18 +19,21 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Cannot disconnect primary authentication method' }, { status: 400 })
   }
 
-  console.log('Disconnecting GitHub account for user:', session.user.id)
-
   try {
-    await db.delete(accounts).where(and(eq(accounts.userId, session.user.id), eq(accounts.provider, 'github')))
-
-    console.log('GitHub account disconnected successfully for user:', session.user.id)
+    const supabase = createAdminClient()
+    const { error } = await supabase
+      .from('user_credentials')
+      .delete()
+      .eq('user_id', session.user.id)
+      .eq('provider', 'github')
+    if (error) {
+      console.error('Disconnect GitHub: delete failed')
+      return Response.json({ error: 'Failed to disconnect' }, { status: 500 })
+    }
+    await supabase.from('accounts').delete().eq('user_id', session.user.id).eq('provider', 'github')
     return Response.json({ success: true })
-  } catch (error) {
-    console.error('Error disconnecting GitHub:', error)
-    return Response.json(
-      { error: 'Failed to disconnect', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    )
+  } catch {
+    console.error('Disconnect GitHub: unexpected error')
+    return Response.json({ error: 'Failed to disconnect' }, { status: 500 })
   }
 }

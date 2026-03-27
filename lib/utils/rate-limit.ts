@@ -1,51 +1,43 @@
-import { db } from '@/lib/db/client'
-import { tasks, taskMessages } from '@/lib/db/schema'
-import { eq, gte, and, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getMaxMessagesPerDay } from '@/lib/db/settings'
 
 export async function checkRateLimit(
   userId: string,
 ): Promise<{ allowed: boolean; remaining: number; total: number; resetAt: Date }> {
-  // Get max messages per day for this user (user-specific > global > env var)
   const maxMessagesPerDay = await getMaxMessagesPerDay(userId)
 
-  // Get start of today (UTC)
   const today = new Date()
   today.setUTCHours(0, 0, 0, 0)
 
-  // Get end of today (UTC)
   const tomorrow = new Date(today)
   tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
 
-  // Count tasks created by this user today (excluding soft-deleted tasks)
-  const tasksToday = await db
-    .select()
-    .from(tasks)
-    .where(and(eq(tasks.userId, userId), gte(tasks.createdAt, today), isNull(tasks.deletedAt)))
+  const supabase = createAdminClient()
 
-  // Count user messages sent today across all tasks
-  const userMessagesToday = await db
-    .select()
-    .from(taskMessages)
-    .innerJoin(tasks, eq(taskMessages.taskId, tasks.id))
-    .where(
-      and(
-        eq(tasks.userId, userId),
-        eq(taskMessages.role, 'user'),
-        gte(taskMessages.createdAt, today),
-        isNull(tasks.deletedAt),
-      ),
-    )
+  // Count tasks created by this user today (excluding soft-deleted)
+  const { data: tasksToday } = await supabase
+    .from('tasks')
+    .select('id')
+    .eq('user_id', userId)
+    .gte('created_at', today.toISOString())
+    .is('deleted_at', null)
 
-  // Total count includes both new tasks and follow-up messages
-  const count = tasksToday.length + userMessagesToday.length
+  // Count user messages sent today across all non-deleted tasks
+  const taskIds = (tasksToday || []).map((t) => t.id)
+  let messageCount = 0
+  if (taskIds.length > 0) {
+    const { data: messages } = await supabase
+      .from('task_messages')
+      .select('id')
+      .in('task_id', taskIds)
+      .eq('role', 'user')
+      .gte('created_at', today.toISOString())
+    messageCount = messages?.length ?? 0
+  }
+
+  const count = (tasksToday?.length ?? 0) + messageCount
   const remaining = Math.max(0, maxMessagesPerDay - count)
   const allowed = count < maxMessagesPerDay
 
-  return {
-    allowed,
-    remaining,
-    total: maxMessagesPerDay,
-    resetAt: tomorrow,
-  }
+  return { allowed, remaining, total: maxMessagesPerDay, resetAt: tomorrow }
 }

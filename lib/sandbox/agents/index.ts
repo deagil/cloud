@@ -7,7 +7,7 @@ import { executeCursorInSandbox } from './cursor'
 import { executeGeminiInSandbox } from './gemini'
 import { executeOpenCodeInSandbox } from './opencode'
 import { TaskLogger } from '@/lib/utils/task-logger'
-import { Connector } from '@/lib/db/schema'
+import type { Connector } from '@/lib/db/schema'
 
 export type AgentType = 'claude' | 'codex' | 'copilot' | 'cursor' | 'gemini' | 'opencode'
 

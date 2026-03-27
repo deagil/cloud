@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db/client'
-import { tasks } from '@/lib/db/schema'
-import { eq, and, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { getOctokit, parseGitHubUrl } from '@/lib/github/client'
 
@@ -14,18 +12,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { taskId } = await params
 
-    // Get task from database and verify ownership (exclude soft-deleted)
-    const [task] = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+    const supabase = createAdminClient()
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
       .limit(1)
+      .maybeSingle()
 
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
 
-    if (!task.repoUrl || !task.prNumber) {
+    if (!task.repo_url || !task.pr_number) {
       return NextResponse.json({ error: 'Task does not have a pull request' }, { status: 400 })
     }
 
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     // Parse repository URL
-    const parsed = parseGitHubUrl(task.repoUrl)
+    const parsed = parseGitHubUrl(task.repo_url)
     if (!parsed) {
       return NextResponse.json({ error: 'Invalid GitHub repository URL' }, { status: 400 })
     }
@@ -53,18 +54,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       await octokit.rest.pulls.update({
         owner,
         repo,
-        pull_number: task.prNumber,
+        pull_number: task.pr_number,
         state: 'closed',
       })
 
       // Update task status in database
-      await db
-        .update(tasks)
-        .set({
-          prStatus: 'closed',
-          updatedAt: new Date(),
-        })
-        .where(eq(tasks.id, task.id))
+      await supabase
+        .from('tasks')
+        .update({ pr_status: 'closed', updated_at: new Date().toISOString() })
+        .eq('id', task.id)
 
       return NextResponse.json({
         success: true,

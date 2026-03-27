@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { getServerSession } from '@/lib/session/get-server-session'
-import { db } from '@/lib/db/client'
-import { tasks, taskMessages, connectors } from '@/lib/db/schema'
-import { eq, and, asc, isNull } from 'drizzle-orm'
+import { createAdminClient } from '@/lib/supabase/admin'
+import type { Connector } from '@/lib/db/schema'
 import { generateId } from '@/lib/utils/id'
 import { createTaskLogger } from '@/lib/utils/task-logger'
 import { Sandbox } from '@vercel/sandbox'
@@ -10,7 +9,7 @@ import { createSandbox } from '@/lib/sandbox/creation'
 import { executeAgentInSandbox, AgentType } from '@/lib/sandbox/agents'
 import { pushChangesToBranch, shutdownSandbox } from '@/lib/sandbox/git'
 import { unregisterSandbox } from '@/lib/sandbox/sandbox-registry'
-import { decrypt } from '@/lib/crypto'
+import { loadConnectedMcpConnectorsForUser } from '@/lib/connectors/load-for-session'
 import { getUserGitHubToken } from '@/lib/github/user-token'
 import { getGitHubUser } from '@/lib/github/client'
 import { getUserApiKeys } from '@/lib/api-keys/user-keys'
@@ -50,39 +49,43 @@ export async function POST(req: NextRequest, context: { params: Promise<{ taskId
     }
 
     // Get the task and verify ownership
-    const [task] = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
+    const supabase = createAdminClient()
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
       .limit(1)
+      .maybeSingle()
 
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
 
     // Check if task has a branch name (required to continue)
-    if (!task.branchName) {
+    if (!task.branch_name) {
       return NextResponse.json({ error: 'Task does not have a branch to continue from' }, { status: 400 })
     }
 
     // Save the user's message
-    await db.insert(taskMessages).values({
+    await supabase.from('task_messages').insert({
       id: generateId(12),
-      taskId,
+      task_id: taskId,
       role: 'user',
       content: message.trim(),
     })
 
     // Reset task status and progress
-    await db
-      .update(tasks)
-      .set({
+    await supabase
+      .from('tasks')
+      .update({
         status: 'processing',
         progress: 0,
-        updatedAt: new Date(),
-        completedAt: null,
+        updated_at: new Date().toISOString(),
+        completed_at: null,
       })
-      .where(eq(tasks.id, taskId))
+      .eq('id', taskId)
 
     // Get user's API keys, GitHub token, and GitHub user info
     const userApiKeys = await getUserApiKeys()
@@ -96,12 +99,12 @@ export async function POST(req: NextRequest, context: { params: Promise<{ taskId
       await continueTask(
         taskId,
         message.trim(),
-        task.repoUrl || '',
-        task.branchName || '',
-        task.maxDuration || maxSandboxDuration,
-        task.selectedAgent || 'claude',
-        task.selectedModel || undefined,
-        task.installDependencies || false,
+        task.repo_url || '',
+        task.branch_name || '',
+        task.max_duration || maxSandboxDuration,
+        task.selected_agent || 'claude',
+        task.selected_model || undefined,
+        task.install_dependencies || false,
         userApiKeys,
         userGithubToken,
         githubUser,
@@ -153,7 +156,13 @@ async function continueTask(
     }
 
     // Fetch task to get sandboxId and keepAlive settings
-    const [currentTask] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+    const supabase = createAdminClient()
+    const { data: currentTask } = await supabase
+      .from('tasks')
+      .select('sandbox_id, keep_alive, agent_session_id')
+      .eq('id', taskId)
+      .limit(1)
+      .maybeSingle()
 
     if (!currentTask) {
       throw new Error('Task not found')
@@ -161,17 +170,17 @@ async function continueTask(
 
     // Try to reconnect to existing sandbox if keepAlive was enabled
     console.log('Checking for existing sandbox:', {
-      hasSandboxId: !!currentTask.sandboxId,
-      sandboxId: currentTask.sandboxId,
-      keepAlive: currentTask.keepAlive,
+      hasSandboxId: !!currentTask.sandbox_id,
+      sandboxId: currentTask.sandbox_id,
+      keepAlive: currentTask.keep_alive,
     })
 
-    if (currentTask.sandboxId && currentTask.keepAlive) {
+    if (currentTask.sandbox_id && currentTask.keep_alive) {
       try {
         await logger.info('Attempting to reconnect to existing sandbox')
-        console.log('Calling Sandbox.get with sandboxId:', currentTask.sandboxId)
+        console.log('Calling Sandbox.get with sandboxId:', currentTask.sandbox_id)
         const reconnectedSandbox = await Sandbox.get({
-          sandboxId: currentTask.sandboxId,
+          sandboxId: currentTask.sandbox_id,
           teamId: process.env.SANDBOX_VERCEL_TEAM_ID!,
           projectId: process.env.SANDBOX_VERCEL_PROJECT_ID!,
           token: process.env.SANDBOX_VERCEL_TOKEN!,
@@ -232,28 +241,28 @@ async function continueTask(
       const { sandbox: createdSandbox, domain } = sandboxResult
       sandbox = createdSandbox || null
 
-      await db
-        .update(tasks)
-        .set({
-          sandboxId: sandbox?.sandboxId || undefined,
-          sandboxUrl: domain || undefined,
-          updatedAt: new Date(),
+      await supabase
+        .from('tasks')
+        .update({
+          sandbox_id: sandbox?.sandboxId || null,
+          sandbox_url: domain || null,
+          updated_at: new Date().toISOString(),
         })
-        .where(eq(tasks.id, taskId))
+        .eq('id', taskId)
     }
 
     console.log('Starting agent execution')
 
     // Fetch the last 5 messages for context (excluding the current message we just saved)
-    const previousMessages = await db
-      .select()
-      .from(taskMessages)
-      .where(eq(taskMessages.taskId, taskId))
-      .orderBy(asc(taskMessages.createdAt))
+    const { data: previousMessages } = await supabase
+      .from('task_messages')
+      .select('*')
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: true })
       .limit(10) // Get last 10 to ensure we have at least 5 before the current one
 
     // Get the last 5 messages before the current one (which is the last message)
-    const contextMessages = previousMessages.slice(-6, -1) // Last 6 excluding the very last one, giving us 5 messages
+    const contextMessages = (previousMessages ?? []).slice(-6, -1) // Last 6 excluding the very last one, giving us 5 messages
 
     // Build conversation history context - put the new request FIRST, then context
     // Sanitize the current prompt to prevent CLI option parsing issues
@@ -283,27 +292,13 @@ async function continueTask(
       promptWithContext = `${sanitizedPrompt}${conversationHistory}`
     }
 
-    type Connector = typeof connectors.$inferSelect
-
     let mcpServers: Connector[] = []
 
     try {
       const session = await getServerSession()
 
       if (session?.user?.id) {
-        const userConnectors = await db
-          .select()
-          .from(connectors)
-          .where(and(eq(connectors.userId, session.user.id), eq(connectors.status, 'connected')))
-
-        mcpServers = userConnectors.map((connector: Connector) => {
-          const decryptedEnv = connector.env ? JSON.parse(decrypt(connector.env)) : null
-          return {
-            ...connector,
-            env: decryptedEnv,
-            oauthClientSecret: connector.oauthClientSecret ? decrypt(connector.oauthClientSecret) : null,
-          }
-        })
+        mcpServers = await loadConnectedMcpConnectorsForUser(session.user.id, supabase)
 
         if (mcpServers.length > 0) {
           await logger.info('Found connected MCP servers')
@@ -331,7 +326,7 @@ async function continueTask(
       undefined,
       apiKeys,
       isResumedSandbox, // Pass whether this is a resumed sandbox
-      currentTask.agentSessionId || undefined, // Pass agent session ID for resumption
+      currentTask.agent_session_id || undefined, // Pass agent session ID for resumption
       taskId, // taskId for streaming updates
       agentMessageId, // agentMessageId for streaming updates
     )
@@ -340,7 +335,7 @@ async function continueTask(
 
     // Update agent session ID if provided (for Cursor agent resumption)
     if (agentResult.sessionId) {
-      await db.update(tasks).set({ agentSessionId: agentResult.sessionId }).where(eq(tasks.id, taskId))
+      await supabase.from('tasks').update({ agent_session_id: agentResult.sessionId }).eq('id', taskId)
     }
 
     if (agentResult.success) {
@@ -352,9 +347,9 @@ async function continueTask(
 
         // Save the agent's response message
         try {
-          await db.insert(taskMessages).values({
+          await supabase.from('task_messages').insert({
             id: generateId(12),
-            taskId,
+            task_id: taskId,
             role: 'agent',
             content: agentResult.agentResponse,
           })
@@ -396,10 +391,14 @@ async function continueTask(
       const pushResult = await pushChangesToBranch(sandbox, branchName, commitMessage, logger)
 
       // Conditionally shutdown sandbox based on task's keepAlive setting
-      // Get the task to check keepAlive setting
-      const [currentTask] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+      const { data: latestTask } = await supabase
+        .from('tasks')
+        .select('keep_alive')
+        .eq('id', taskId)
+        .limit(1)
+        .maybeSingle()
 
-      if (currentTask?.keepAlive) {
+      if (latestTask?.keep_alive) {
         // Keep sandbox alive for future follow-up messages
         await logger.info('Sandbox kept alive for follow-up messages')
       } else {
@@ -441,10 +440,16 @@ async function continueTask(
 
     try {
       if (sandbox) {
+        const supabase = createAdminClient()
         // Check keepAlive setting before shutting down sandbox on error
-        const [currentTask] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+        const { data: latestTask } = await supabase
+          .from('tasks')
+          .select('keep_alive')
+          .eq('id', taskId)
+          .limit(1)
+          .maybeSingle()
 
-        if (currentTask?.keepAlive) {
+        if (latestTask?.keep_alive) {
           // Keep sandbox alive even on error for potential retry
           await logger.info('Sandbox kept alive despite error')
         } else {
@@ -461,12 +466,13 @@ async function continueTask(
     // Error details are saved to the database for debugging
     console.error('Task error details:', errorMessage)
 
-    await db
-      .update(tasks)
-      .set({
+    const supabase = createAdminClient()
+    await supabase
+      .from('tasks')
+      .update({
         error: errorMessage,
-        updatedAt: new Date(),
+        updated_at: new Date().toISOString(),
       })
-      .where(eq(tasks.id, taskId))
+      .eq('id', taskId)
   }
 }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { Sandbox } from '@vercel/sandbox'
-import { db } from '@/lib/db/client'
-import { tasks, insertTaskSchema, connectors, taskMessages } from '@/lib/db/schema'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { insertTaskSchema } from '@/lib/db/schema'
+import type { Connector } from '@/lib/db/schema'
 import { generateId } from '@/lib/utils/id'
 import { createSandbox } from '@/lib/sandbox/creation'
 import { executeAgentInSandbox, AgentType } from '@/lib/sandbox/agents'
@@ -10,12 +11,11 @@ import { unregisterSandbox } from '@/lib/sandbox/sandbox-registry'
 import { detectPackageManager } from '@/lib/sandbox/package-manager'
 import { runCommandInSandbox, runInProject, PROJECT_DIR } from '@/lib/sandbox/commands'
 import { detectPortFromRepo } from '@/lib/sandbox/port-detection'
-import { eq, desc, or, and, isNull } from 'drizzle-orm'
 import { createTaskLogger } from '@/lib/utils/task-logger'
 import { generateBranchName, createFallbackBranchName } from '@/lib/utils/branch-name-generator'
 import { generateTaskTitle, createFallbackTitle } from '@/lib/utils/title-generator'
 import { generateCommitMessage, createFallbackCommitMessage } from '@/lib/utils/commit-message-generator'
-import { decrypt } from '@/lib/crypto'
+import { loadConnectedMcpConnectorsForUser } from '@/lib/connectors/load-for-session'
 import { getServerSession } from '@/lib/session/get-server-session'
 import { getUserGitHubToken } from '@/lib/github/user-token'
 import { getGitHubUser } from '@/lib/github/client'
@@ -32,13 +32,15 @@ export async function GET() {
     }
 
     // Get tasks for this user only (exclude soft-deleted tasks)
-    const userTasks = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.userId, session.user.id), isNull(tasks.deletedAt)))
-      .orderBy(desc(tasks.createdAt))
+    const supabase = createAdminClient()
+    const { data: userTasks } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
 
-    return NextResponse.json({ tasks: userTasks })
+    return NextResponse.json({ tasks: userTasks ?? [] })
   } catch (error) {
     console.error('Error fetching tasks:', error)
     return NextResponse.json({ error: 'Failed to fetch tasks' }, { status: 500 })
@@ -81,14 +83,40 @@ export async function POST(request: NextRequest) {
       logs: [],
     })
 
-    // Insert the task into the database - ensure id is definitely present
-    const [newTask] = await db
-      .insert(tasks)
-      .values({
-        ...validatedData,
-        id: taskId, // Ensure id is always present
+    // Insert the task into the database
+    const supabase = createAdminClient()
+    const { data: newTask, error: insertError } = await supabase
+      .from('tasks')
+      .insert({
+        id: taskId,
+        user_id: validatedData.userId,
+        prompt: validatedData.prompt,
+        title: validatedData.title ?? null,
+        repo_url: validatedData.repoUrl ?? null,
+        selected_agent: validatedData.selectedAgent ?? null,
+        selected_model: validatedData.selectedModel ?? null,
+        install_dependencies: validatedData.installDependencies ?? false,
+        max_duration: validatedData.maxDuration,
+        keep_alive: validatedData.keepAlive ?? false,
+        enable_browser: validatedData.enableBrowser ?? false,
+        status: validatedData.status,
+        progress: validatedData.progress,
+        logs: validatedData.logs ?? [],
       })
-      .returning()
+      .select()
+      .single()
+
+    if (insertError || !newTask) {
+      console.error('Task insert failed')
+      return NextResponse.json(
+        {
+          error: 'Failed to create task',
+          message:
+            'Could not save the task. If you use Supabase Auth, ensure tasks.user_id references the same user ids as auth (e.g. profiles.id) and foreign keys are satisfied.',
+        },
+        { status: 500 },
+      )
+    }
 
     // Generate AI branch name after response is sent (non-blocking)
     after(async () => {
@@ -122,13 +150,11 @@ export async function POST(request: NextRequest) {
         })
 
         // Update task with AI-generated branch name
-        await db
-          .update(tasks)
-          .set({
-            branchName: aiBranchName,
-            updatedAt: new Date(),
-          })
-          .where(eq(tasks.id, taskId))
+        const supabase = createAdminClient()
+        await supabase
+          .from('tasks')
+          .update({ branch_name: aiBranchName, updated_at: new Date().toISOString() })
+          .eq('id', taskId)
 
         await logger.success('Generated AI branch name')
       } catch (error) {
@@ -138,13 +164,11 @@ export async function POST(request: NextRequest) {
         const fallbackBranchName = createFallbackBranchName(taskId)
 
         try {
-          await db
-            .update(tasks)
-            .set({
-              branchName: fallbackBranchName,
-              updatedAt: new Date(),
-            })
-            .where(eq(tasks.id, taskId))
+          const supabase = createAdminClient()
+          await supabase
+            .from('tasks')
+            .update({ branch_name: fallbackBranchName, updated_at: new Date().toISOString() })
+            .eq('id', taskId)
 
           const logger = createTaskLogger(taskId)
           await logger.info('Using fallback branch name')
@@ -183,13 +207,8 @@ export async function POST(request: NextRequest) {
         })
 
         // Update task with AI-generated title
-        await db
-          .update(tasks)
-          .set({
-            title: aiTitle,
-            updatedAt: new Date(),
-          })
-          .where(eq(tasks.id, taskId))
+        const supabase = createAdminClient()
+        await supabase.from('tasks').update({ title: aiTitle, updated_at: new Date().toISOString() }).eq('id', taskId)
       } catch (error) {
         console.error('Error generating AI title:', error)
 
@@ -197,13 +216,11 @@ export async function POST(request: NextRequest) {
         const fallbackTitle = createFallbackTitle(validatedData.prompt)
 
         try {
-          await db
-            .update(tasks)
-            .set({
-              title: fallbackTitle,
-              updatedAt: new Date(),
-            })
-            .where(eq(tasks.id, taskId))
+          const supabase = createAdminClient()
+          await supabase
+            .from('tasks')
+            .update({ title: fallbackTitle, updated_at: new Date().toISOString() })
+            .eq('id', taskId)
         } catch (dbError) {
           console.error('Error updating task with fallback title:', dbError)
         }
@@ -223,7 +240,7 @@ export async function POST(request: NextRequest) {
     after(async () => {
       try {
         await processTaskWithTimeout(
-          newTask.id,
+          taskId,
           validatedData.prompt,
           validatedData.repoUrl || '',
           validatedData.maxDuration || maxSandboxDuration,
@@ -337,9 +354,10 @@ async function waitForBranchName(taskId: string, maxWaitMs: number = 10000): Pro
 
   while (Date.now() - startTime < maxWaitMs) {
     try {
-      const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId))
-      if (task?.branchName) {
-        return task.branchName
+      const supabase = createAdminClient()
+      const { data: task } = await supabase.from('tasks').select('branch_name').eq('id', taskId).limit(1).maybeSingle()
+      if (task?.branch_name) {
+        return task.branch_name
       }
     } catch (error) {
       console.error('Error checking for branch name:', error)
@@ -355,7 +373,8 @@ async function waitForBranchName(taskId: string, maxWaitMs: number = 10000): Pro
 // Helper function to check if task was stopped
 async function isTaskStopped(taskId: string): Promise<boolean> {
   try {
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+    const supabase = createAdminClient()
+    const { data: task } = await supabase.from('tasks').select('status').eq('id', taskId).limit(1).maybeSingle()
     return task?.status === 'stopped'
   } catch (error) {
     console.error('Error checking task status:', error)
@@ -389,7 +408,6 @@ async function processTask(
 ) {
   let sandbox: Sandbox | null = null
   const logger = createTaskLogger(taskId)
-  const taskStartTime = Date.now()
 
   try {
     console.log('Starting task processing')
@@ -400,9 +418,10 @@ async function processTask(
 
     // Save the user's message
     try {
-      await db.insert(taskMessages).values({
+      const supabase = createAdminClient()
+      await supabase.from('task_messages').insert({
         id: generateId(12),
-        taskId,
+        task_id: taskId,
         role: 'user',
         content: prompt,
       })
@@ -504,18 +523,19 @@ async function processTask(
     console.log('Sandbox created successfully')
 
     // Update sandbox URL, sandbox ID, and branch name (only update branch name if not already set by AI)
-    const updateData: { sandboxUrl?: string; sandboxId?: string; updatedAt: Date; branchName?: string } = {
-      sandboxId: sandbox?.sandboxId || undefined,
-      sandboxUrl: domain || undefined,
-      updatedAt: new Date(),
+    const updateData: Record<string, unknown> = {
+      sandbox_id: sandbox?.sandboxId ?? null,
+      sandbox_url: domain ?? null,
+      updated_at: new Date().toISOString(),
     }
 
     // Only update branch name if we don't already have an AI-generated one
     if (!aiBranchName) {
-      updateData.branchName = branchName
+      updateData.branch_name = branchName
     }
 
-    await db.update(tasks).set(updateData).where(eq(tasks.id, taskId))
+    const supabase = createAdminClient()
+    await supabase.from('tasks').update(updateData).eq('id', taskId)
 
     // Check if task was stopped before agent execution
     if (await isTaskStopped(taskId)) {
@@ -531,8 +551,6 @@ async function processTask(
       throw new Error('Sandbox is not available for agent execution')
     }
 
-    type Connector = typeof connectors.$inferSelect
-
     let mcpServers: Connector[] = []
 
     try {
@@ -540,32 +558,19 @@ async function processTask(
       const session = await getServerSession()
 
       if (session?.user?.id) {
-        const userConnectors = await db
-          .select()
-          .from(connectors)
-          .where(and(eq(connectors.userId, session.user.id), eq(connectors.status, 'connected')))
-
-        mcpServers = userConnectors.map((connector: Connector) => {
-          // Decrypt sensitive fields
-          const decryptedEnv = connector.env ? JSON.parse(decrypt(connector.env)) : null
-          return {
-            ...connector,
-            env: decryptedEnv,
-            oauthClientSecret: connector.oauthClientSecret ? decrypt(connector.oauthClientSecret) : null,
-          }
-        })
+        mcpServers = await loadConnectedMcpConnectorsForUser(session.user.id, supabase)
 
         if (mcpServers.length > 0) {
           await logger.info('Found connected MCP servers')
 
           // Store MCP server IDs in the task
-          await db
-            .update(tasks)
-            .set({
-              mcpServerIds: JSON.parse(JSON.stringify(mcpServers.map((s) => s.id))),
-              updatedAt: new Date(),
+          await supabase
+            .from('tasks')
+            .update({
+              mcp_server_ids: mcpServers.map((s) => s.id),
+              updated_at: new Date().toISOString(),
             })
-            .where(eq(tasks.id, taskId))
+            .eq('id', taskId)
         } else {
           await logger.info('No connected MCP servers found for current user')
         }
@@ -606,7 +611,7 @@ async function processTask(
 
     // Update agent session ID if provided (for Cursor agent resumption)
     if (agentResult.sessionId) {
-      await db.update(tasks).set({ agentSessionId: agentResult.sessionId }).where(eq(tasks.id, taskId))
+      await supabase.from('tasks').update({ agent_session_id: agentResult.sessionId }).eq('id', taskId)
     }
 
     if (agentResult.success) {
@@ -619,9 +624,9 @@ async function processTask(
 
         // Save the agent's response message
         try {
-          await db.insert(taskMessages).values({
+          await supabase.from('task_messages').insert({
             id: generateId(12),
-            taskId,
+            task_id: taskId,
             role: 'agent',
             content: agentResult.agentResponse,
           })
@@ -763,39 +768,39 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    // Build the where conditions for task status
-    const statusConditions = []
-    if (actions.includes('completed')) {
-      statusConditions.push(eq(tasks.status, 'completed'))
-    }
-    if (actions.includes('failed')) {
-      statusConditions.push(eq(tasks.status, 'error'))
-    }
-    if (actions.includes('stopped')) {
-      statusConditions.push(eq(tasks.status, 'stopped'))
-    }
+    // Build the list of statuses to delete
+    const statuses: string[] = []
+    if (actions.includes('completed')) statuses.push('completed')
+    if (actions.includes('failed')) statuses.push('error')
+    if (actions.includes('stopped')) statuses.push('stopped')
 
-    if (statusConditions.length === 0) {
+    if (statuses.length === 0) {
       return NextResponse.json({ error: 'No valid actions specified' }, { status: 400 })
     }
 
     // Delete tasks based on conditions AND user ownership
-    const statusClause = statusConditions.length === 1 ? statusConditions[0] : or(...statusConditions)
-    const whereClause = and(statusClause, eq(tasks.userId, session.user.id))
-    const deletedTasks = await db.delete(tasks).where(whereClause).returning()
+    const supabase = createAdminClient()
+    const { data: deletedTasks } = await supabase
+      .from('tasks')
+      .delete()
+      .eq('user_id', session.user.id)
+      .in('status', statuses)
+      .select('status')
+
+    const deleted = deletedTasks ?? []
 
     // Build response message
     const actionMessages = []
     if (actions.includes('completed')) {
-      const completedCount = deletedTasks.filter((task) => task.status === 'completed').length
+      const completedCount = deleted.filter((task) => task.status === 'completed').length
       if (completedCount > 0) actionMessages.push(`${completedCount} completed`)
     }
     if (actions.includes('failed')) {
-      const failedCount = deletedTasks.filter((task) => task.status === 'error').length
+      const failedCount = deleted.filter((task) => task.status === 'error').length
       if (failedCount > 0) actionMessages.push(`${failedCount} failed`)
     }
     if (actions.includes('stopped')) {
-      const stoppedCount = deletedTasks.filter((task) => task.status === 'stopped').length
+      const stoppedCount = deleted.filter((task) => task.status === 'stopped').length
       if (stoppedCount > 0) actionMessages.push(`${stoppedCount} stopped`)
     }
 
@@ -806,7 +811,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({
       message,
-      deletedCount: deletedTasks.length,
+      deletedCount: deleted.length,
     })
   } catch (error) {
     console.error('Error deleting tasks:', error)

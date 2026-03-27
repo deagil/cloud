@@ -3,12 +3,10 @@ import { runCommandInSandbox, runInProject, PROJECT_DIR } from '../commands'
 import { AgentExecutionResult } from '../types'
 import { redactSensitiveInfo } from '@/lib/utils/logging'
 import { TaskLogger } from '@/lib/utils/task-logger'
-import { connectors, taskMessages } from '@/lib/db/schema'
-import { db } from '@/lib/db/client'
-import { eq } from 'drizzle-orm'
+import type { Connector } from '@/lib/db/schema'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { generateId } from '@/lib/utils/id'
-
-type Connector = typeof connectors.$inferSelect
+import { getNodeWritableClass } from '@/lib/sandbox/node-writable'
 
 // Helper function to run command and collect logs in project directory
 async function runAndLogCommand(sandbox: Sandbox, command: string, args: string[], logger: TaskLogger) {
@@ -193,13 +191,29 @@ EOF`
     let capturedError = ''
 
     // Create custom writable streams to capture the output
-    const { Writable } = await import('stream')
+    const Writable = getNodeWritableClass()
 
     interface WriteCallback {
       (error?: Error | null): void
     }
 
     let extractedSessionId: string | undefined
+
+    // Create initial agent message in database if taskId provided
+    if (taskId) {
+      agentMessageId = generateId(12)
+      const supabase = createAdminClient()
+      await supabase.from('task_messages').insert({
+        id: agentMessageId,
+        task_id: taskId,
+        role: 'agent',
+        content: '<pre class="whitespace-pre-wrap font-sans text-xs">',
+      })
+      // Initialize accumulated content with opening pre tag
+      accumulatedContent = '<pre class="whitespace-pre-wrap font-sans text-xs">'
+    }
+
+    const supabase = createAdminClient()
 
     const captureStdout = new Writable({
       write(chunk: Buffer | string, encoding: BufferEncoding, callback: WriteCallback) {
@@ -234,10 +248,11 @@ EOF`
                 accumulatedContent += line + '\n'
 
                 // Update database with accumulated content (throttled via catch)
-                db.update(taskMessages)
-                  .set({ content: accumulatedContent })
-                  .where(eq(taskMessages.id, agentMessageId))
-                  .catch((err: Error) => {
+                supabase
+                  .from('task_messages')
+                  .update({ content: accumulatedContent })
+                  .eq('id', agentMessageId)
+                  .catch((_err: Error) => {
                     // Silently ignore update errors to avoid flooding logs
                   })
               }
@@ -255,19 +270,6 @@ EOF`
         callback()
       },
     })
-
-    // Create initial agent message in database if taskId provided
-    if (taskId) {
-      agentMessageId = generateId(12)
-      await db.insert(taskMessages).values({
-        id: agentMessageId,
-        taskId,
-        role: 'agent',
-        content: '<pre class="whitespace-pre-wrap font-sans text-xs">',
-      })
-      // Initialize accumulated content with opening pre tag
-      accumulatedContent = '<pre class="whitespace-pre-wrap font-sans text-xs">'
-    }
 
     // Build the copilot command
     const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
@@ -343,10 +345,10 @@ EOF`
     // Close the pre tag if streaming to database
     if (agentMessageId && taskId) {
       accumulatedContent += '</pre>'
-      await db
-        .update(taskMessages)
-        .set({ content: accumulatedContent })
-        .where(eq(taskMessages.id, agentMessageId))
+      await supabase
+        .from('task_messages')
+        .update({ content: accumulatedContent })
+        .eq('id', agentMessageId)
         .catch((err: Error) => console.error('Failed to update message:', err))
     }
 
@@ -369,10 +371,11 @@ EOF`
     // Close the pre tag if streaming to database and there was an error
     if (agentMessageId && taskId) {
       accumulatedContent += '</pre>'
-      await db
-        .update(taskMessages)
-        .set({ content: accumulatedContent })
-        .where(eq(taskMessages.id, agentMessageId))
+      const supabase = createAdminClient()
+      await supabase
+        .from('task_messages')
+        .update({ content: accumulatedContent })
+        .eq('id', agentMessageId)
         .catch((err: Error) => console.error('Failed to update message:', err))
     }
 
