@@ -149,7 +149,7 @@ export function AppLayout({ children, initialSidebarWidth, initialSidebarOpen, i
     fetchTasks()
   }, [])
 
-  //GET /api/tasks
+  //GET /api/runs
   // Poll for task updates every 10 seconds
   useEffect(() => {
     const interval = setInterval(() => {
@@ -193,7 +193,7 @@ export function AppLayout({ children, initialSidebarWidth, initialSidebarOpen, i
 
   const fetchTasks = async () => {
     try {
-      const response = await fetch('/api/tasks')
+      const response = await fetch('/api/runs')
       if (response.ok) {
         const data = await response.json()
         setTasks(data.tasks)
@@ -220,6 +220,7 @@ export function AppLayout({ children, initialSidebarWidth, initialSidebarOpen, i
     const optimisticTask: Task = {
       id,
       userId: 'temp', // Temporary value, will be replaced by server
+      threadId: null,
       prompt: taskData.prompt,
       title: null,
       repoUrl: taskData.repoUrl,

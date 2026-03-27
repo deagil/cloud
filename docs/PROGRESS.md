@@ -7,15 +7,15 @@ Full plan: `/Users/dylangilchrist/.claude/plans/curried-herding-penguin.md`
 
 ## Phase 1 — Foundation ✅ Complete
 
-Supabase Auth + multi-tenant schema. No user-facing regressions — old task routes still compile via compatibility shim.
+Supabase Auth + multi-tenant schema. Execution and APIs now use **`runs`** / **`threads`** (see Phase 2); legacy **`app/api/tasks/`** has been removed.
 
 ### Done
-- **Dependencies** — removed `drizzle-orm`, `drizzle-kit`, `jose`, `arctic`, `@neondatabase/serverless`, `postgres`; added `@supabase/supabase-js`, `@supabase/ssr`
+- **Dependencies** — removed `drizzle-orm`, `drizzle-kit`, `jose`, `arctic`, `@neondatabase/serverless`, `postgres`; added `@supabase/supabase-js`, `@supabase/ssr` (see Phase 2 for **`sandbox-agent`**, Phase 3 for **`@slack/web-api`**)
 - **`lib/supabase/server.ts`** — cookie-based server client (respects RLS)
 - **`lib/supabase/client.ts`** — browser client
 - **`lib/supabase/admin.ts`** — service role client for background jobs/webhooks (bypasses RLS)
 - **`middleware.ts`** — Supabase session refresh + route protection
-- **`lib/session/get-server-session.ts`** — compatibility shim over Supabase Auth; all 33 existing task routes continue to work unchanged
+- **`lib/session/get-server-session.ts`** — Supabase Auth session helper for API routes and server components
 - **`lib/db/profiles.ts`** — `getProfileByUserId()`, `upsertProfile()`, `ensurePersonalWorkspace()`
 - **`lib/db/client.ts`** — runtime-error stub; routes using old `db` object fail with clear message
 - **`lib/types/database.ts`** — full Supabase Database type definition
@@ -30,6 +30,9 @@ Supabase Auth + multi-tenant schema. No user-facing regressions — old task rou
   - `0002` — Row Level Security policies on every table (workspace-scoped access, service role for background writes)
   - `0003` — Supabase Realtime enabled for `runs`, `run_events`, `review_runs`
   - `0004` — Storage buckets: `run-artifacts` (private) + `profile-photos` (public)
+  - `0005` — Legacy `tasks` / `task_messages` (optional; app targets `runs` / `thread_messages`)
+  - `0006` — `thread_messages` table + RLS + Realtime publication (chat timeline per thread)
+  - `0007` — Extra `runs` columns for execution (`repo_url`, `logs`, `preview_url`, etc.)
 
 ### To apply migrations
 ```bash
@@ -41,39 +44,46 @@ pnpm dev
 
 ---
 
-## Phase 2 — Core Execution ⬜ Not Started
+## Phase 2 — Core Execution ✅ Complete
 
-Replace 6 CLI adapters with `sandbox-agent`. Migrate task execution to `runs` domain model. Replace polling with Supabase Realtime.
+Runs live **inside threads**: `thread_messages` = chat timeline (user / agent / system); `runs` = agent jobs; `run_events` = append-only technical stream. **Thread-first** route: `/threads/[threadId]`; **run tools** (sandbox, terminal, files, PR): `/runs/[runId]`. Polling on the run page replaced with **Supabase Realtime** on `runs` + `run_events`.
 
-- [ ] Install `sandbox-agent` npm package
-- [ ] **`lib/sandbox/agent-client.ts`** — HTTP client for sandbox-agent daemon at `:2468` (replaces all of `lib/sandbox/agents/*.ts`)
-- [ ] **`lib/sandbox/creation.ts`** — change `taskId` → `runId`; add sandbox-agent daemon startup after git clone
-- [ ] **`lib/sandbox/execute-run.ts`** — new async execution loop: credential resolve → sandbox create → agent session → stream events → git push → PR → review run
-- [ ] **`lib/credentials/resolve.ts`** — credential resolution chain: user key → workspace key → env var fallback → structured error
-- [ ] **`lib/errors/codes.ts`** — structured error codes (`ai_credentials_required`, `github_credentials_required`, etc.)
-- [ ] **`app/api/runs/route.ts`** — POST creates a run (replaces `app/api/tasks/route.ts` POST)
-- [ ] **`app/api/runs/[runId]/route.ts`** — GET, PATCH (stop), DELETE
-- [ ] Migrate all sub-routes from `app/api/tasks/[taskId]/` → `app/api/runs/[runId]/`
-- [ ] Delete `lib/sandbox/agents/*.ts` (6 files, ~2500 lines)
-- [ ] Delete `lib/db/schema.ts` (Drizzle schema — replaced by SQL migrations)
-- [ ] **`lib/hooks/use-run.ts`** — Supabase Realtime subscriptions (replaces polling in `use-task.ts`)
-- [ ] **`components/run-page-client.tsx`** — adapt task page to use `useRun()` + realtime events
+### Done
+- **`sandbox-agent`** npm package; **`lib/sandbox/agent-client.ts`** — connect to daemon on `:2468`, `createSession` / `prompt`, map events → `RunLogger` / `run_events`
+- **`lib/sandbox/creation.ts`** — `runId`, `startSandboxAgentDaemon` after clone; **`lib/sandbox/execute-run.ts`** — credential resolve → sandbox → agent session → push / status; Slack notify hooks on completion/failure
+- **`lib/credentials/resolve.ts`** — user `user_credentials` + env fallbacks; **`lib/sandbox/config.ts`** — env validation per agent (incl. Cursor)
+- **`lib/errors/codes.ts`** — structured error codes
+- **`app/api/runs/`** — POST (creates/reuses thread, `thread_messages` + `runs`, `after(executeRun)`); GET list; all former **`app/api/tasks/[taskId]/`** behaviors under **`app/api/runs/[runId]/`** (terminal, files, continue, messages → `thread_messages` where appropriate)
+- **Removed** `app/api/tasks/`, legacy **`lib/sandbox/agents/*.ts`** CLI implementations (stubs/types via **`lib/sandbox/agents/index.ts`**)
+- **`lib/hooks/use-run.ts`** — Realtime on `runs` + `run_events`; **`lib/hooks/use-task.ts`** — thin alias over `useRun`
+- **`lib/hooks/use-thread-messages.ts`**, **`use-thread-runs.ts`** — Realtime for thread page
+- **`app/threads/[threadId]/`**, **`components/thread-page-client.tsx`**, **`app/api/threads/[threadId]/route.ts`**, **`lib/threads/server.ts`**
+- **`lib/runs/map-run-to-api.ts`** — DB row → UI shape; **`lib/runs/logs-from-events.ts`** — merge `run_events` into run `logs` for existing log UI
+- **Sandbox Agent agents in UI** (see **`docs/sandbox-agent-agents.md`**): `claude`, `codex`, `cursor`, `opencode` — **`components/task-form.tsx`** restricted list + models
+- Home / multi-repo flows navigate to **`/threads/{threadId}`** when API returns `threadId`; sidebar links prefer thread when `threadId` present
+
+### Deferred / differs from early checklist
+- **`lib/db/schema.ts`** — **kept** as Zod + **`Task`**-shaped UI DTO (camelCase) used across components; not deleted until a dedicated rename to `Run` / generated types is scheduled
+- No separate **`run-page-client.tsx`** rename — **`components/task-page-client.tsx`** still drives **`/runs/[runId]`** with `useRun` + Realtime
+- **Phase 4** review runs / screenshots not wired into execute path yet
 
 ---
 
-## Phase 3 — Slack Integration ⬜ Not Started
+## Phase 3 — Slack Integration ✅ Complete (MVP)
 
-Vercel Chat SDK for Slack. @mentions create runs, lifecycle posts back to thread, review cards with approve/reject.
+Uses **`@slack/web-api`** and Slack **Events API** + **OAuth v2** (not Vercel Chat SDK / `@vercel/chat`). Bot tokens from OAuth are stored encrypted on **`workspace_integrations`** (not a static `SLACK_BOT_TOKEN` in env).
 
-- [ ] Install Vercel Chat SDK (`@vercel/chat` — confirm package name)
-- [ ] **`app/api/chat/slack/route.ts`** — webhook handler: verify signature → resolve workspace → create thread/run → ack → async execute
-- [ ] **Slack trigger logic** — @mention in groups; auto-reply if bot is only non-human in channel/DM
-- [ ] **`app/api/slack/oauth/install/route.ts`** + **`callback/route.ts`** — workspace Slack installation flow
-- [ ] **`app/api/slack/actions/route.ts`** — interactive callbacks (approve/reject/stop buttons)
-- [ ] **`lib/slack/client.ts`** — Chat SDK wrapper initialised with per-workspace bot token
-- [ ] **`lib/slack/notify.ts`** — post run updates, throttled tool call updates, review card on completion
-- [ ] **`lib/slack/blocks.ts`** — Block Kit builders: running card, review card with screenshots
-- [ ] Thread continuation logic — new run vs. queued message vs. send to live agent session
+### Done
+- **`app/api/slack/events/route.ts`** — signature verify (`SLACK_SIGNING_SECRET`), URL challenge, `app_mention` → **`lib/slack/process-mention.ts`** (upsert `threads` / `thread_messages` / `run`, `executeRun`; ack fast + `after()` work)
+- **`app/api/slack/oauth/install/route.ts`** + **`callback/route.ts`** — OAuth; encrypted **`slack_bot_token`** (+ optional encrypted signing secret) in **`workspace_integrations`**; **`slack_workspace_mappings`** (`slack_team_id` → `workspace_id`)
+- **`app/api/slack/actions/route.ts`** — interactivity; **`stop_run`** button handling
+- **`lib/slack/client.ts`**, **`workspace-token.ts`**, **`verify-request.ts`**, **`notify.ts`**, **`blocks.ts`** — Block Kit for in-progress + completion/failure; completion includes PR/preview links when present
+- **`SLACK_DEFAULT_REPO_URL`** — optional env for default repo on Slack-triggered runs (documented in **`.env.example`**)
+- Thread continuation: same Slack thread key → same **`threads`** row; new mention → new **`run`** on that thread (see **`process-mention`**)
+
+### Not done (Phase 4+)
+- Throttled streaming of every `run_event` to Slack (only key lifecycle posts today)
+- Rich review cards with screenshots; **`approve/reject`** via Slack beyond minimal **`stop_run`**
 
 ---
 
@@ -123,7 +133,7 @@ Multi-tenant layout, workspace setup, project management, run history, review da
 - [ ] **`app/[workspaceSlug]/settings/slack/page.tsx`** — Slack integration status + "Add to Slack"
 - [ ] **`app/[workspaceSlug]/settings/members/page.tsx`** — member list, invite, role management
 - [ ] URL structure: `/` → `/dashboard` → `/{workspaceSlug}/runs`
-- [ ] Delete old `app/api/tasks/` routes once UI is fully migrated
+- [x] Delete old `app/api/tasks/` routes — **done** (replaced by `app/api/runs/`)
 
 ---
 
@@ -134,16 +144,19 @@ Multi-tenant layout, workspace setup, project management, run history, review da
 | `NEXT_PUBLIC_SUPABASE_URL` | ⬜ Set in .env.local | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ⬜ Set in .env.local | Supabase anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | ⬜ Set in .env.local | Service role key (server-only) |
-| `ENCRYPTION_KEY` | ⬜ Set in .env.local | AES-256 key for API key encryption |
-| `NEXT_PUBLIC_APP_URL` | ⬜ Set in .env.local | App base URL |
-| `SANDBOX_VERCEL_TOKEN` | ⬜ Carry over | Vercel sandbox API token |
-| `SANDBOX_VERCEL_TEAM_ID` | ⬜ Carry over | Vercel team ID |
-| `SANDBOX_VERCEL_PROJECT_ID` | ⬜ Carry over | Vercel project ID |
-| `AI_GATEWAY_API_KEY` | ⬜ Optional | Vercel AI Gateway for utility calls |
-| `ANTHROPIC_API_KEY` | ⬜ Optional | System-level fallback |
-| `SLACK_BOT_TOKEN` | ⬜ Phase 3 | Slack bot token |
-| `SLACK_SIGNING_SECRET` | ⬜ Phase 3 | Slack request verification |
-| `SLACK_CLIENT_ID/SECRET` | ⬜ Phase 3 | Slack workspace OAuth |
+| `ENCRYPTION_KEY` | ⬜ Set in .env.local | AES-256 key for API key + Slack token encryption at rest |
+| `NEXT_PUBLIC_APP_URL` | ⬜ Set in .env.local | App base URL (Slack OAuth redirect) |
+| `SANDBOX_VERCEL_TOKEN` | ⬜ Required for runs | Vercel sandbox API token |
+| `SANDBOX_VERCEL_TEAM_ID` | ⬜ Required for runs | Vercel team ID |
+| `SANDBOX_VERCEL_PROJECT_ID` | ⬜ Required for runs | Vercel project ID |
+| `AI_GATEWAY_API_KEY` | ⬜ Optional | Vercel AI Gateway (utilities + some agents) |
+| `ANTHROPIC_API_KEY` | ⬜ Optional | System fallback for Claude / opencode |
+| `OPENAI_API_KEY` | ⬜ Optional | System fallback for Codex / opencode |
+| `CURSOR_API_KEY` | ⬜ Optional | System fallback for Sandbox Agent `cursor` (must also reach sandbox runtime) |
+| `SLACK_SIGNING_SECRET` | ⬜ For Slack | Events API + Interactivity verification |
+| `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | ⬜ For Slack | Workspace OAuth install |
+| `SLACK_DEFAULT_REPO_URL` | ⬜ Optional | Default GitHub repo URL for Slack `@mention` runs |
+| `NEXT_PUBLIC_SLACK_APP_ID` | ⬜ Optional | Deep links |
 | `GITHUB_APP_ID` | ⬜ Phase 5 | GitHub App numeric ID |
 | `GITHUB_APP_PRIVATE_KEY` | ⬜ Phase 5 | Base64-encoded PEM key |
 | `GITHUB_WEBHOOK_SECRET` | ⬜ Phase 5 | GitHub webhook verification |

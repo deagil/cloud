@@ -1,5 +1,8 @@
-// Rate limiting configuration
-export const MAX_MESSAGES_PER_DAY = parseInt(process.env.MAX_MESSAGES_PER_DAY || '5', 10)
+// Rate limiting: max tasks + user thread messages per user per UTC day.
+// 0 = no limit (default for self-hosted). Set a positive value to cap usage (e.g. public demos).
+const rawMaxMessages = process.env.MAX_MESSAGES_PER_DAY
+export const MAX_MESSAGES_PER_DAY =
+  rawMaxMessages === undefined || rawMaxMessages === '' ? 0 : parseInt(rawMaxMessages, 10) || 0
 
 // Sandbox configuration (in minutes)
 export const MAX_SANDBOX_DURATION = parseInt(process.env.MAX_SANDBOX_DURATION || '300', 10)

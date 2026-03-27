@@ -11,34 +11,25 @@ export function validateEnvironmentVariables(
 ) {
   const errors: string[] = []
 
-  // Check for required environment variables based on selected agent
-  if (selectedAgent === 'claude' && !apiKeys?.AI_GATEWAY_API_KEY && !process.env.AI_GATEWAY_API_KEY) {
-    errors.push('AI_GATEWAY_API_KEY is required for Claude CLI. Please add your API key in your profile.')
+  const anthropic = apiKeys?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY
+  const openai = apiKeys?.OPENAI_API_KEY || process.env.OPENAI_API_KEY
+  const cursor = apiKeys?.CURSOR_API_KEY || process.env.CURSOR_API_KEY
+  const gateway = apiKeys?.AI_GATEWAY_API_KEY || process.env.AI_GATEWAY_API_KEY
+
+  if (selectedAgent === 'claude' && !anthropic && !gateway) {
+    errors.push('Anthropic or AI Gateway API key is required for Claude. Add a key in your profile.')
   }
 
-  if (selectedAgent === 'cursor' && !apiKeys?.CURSOR_API_KEY && !process.env.CURSOR_API_KEY) {
-    errors.push('CURSOR_API_KEY is required for Cursor CLI. Please add your API key in your profile.')
+  if (selectedAgent === 'codex' && !openai && !gateway) {
+    errors.push('OpenAI or AI Gateway API key is required for Codex. Add a key in your profile.')
   }
 
-  if (selectedAgent === 'codex' && !apiKeys?.AI_GATEWAY_API_KEY && !process.env.AI_GATEWAY_API_KEY) {
-    errors.push('AI_GATEWAY_API_KEY is required for Codex CLI. Please add your API key in your profile.')
+  if (selectedAgent === 'cursor' && !cursor) {
+    errors.push('Cursor API key is required for Cursor agent. Add CURSOR_API_KEY in your profile or environment.')
   }
 
-  if (selectedAgent === 'gemini' && !apiKeys?.GEMINI_API_KEY && !process.env.GEMINI_API_KEY) {
-    errors.push('GEMINI_API_KEY is required for Gemini CLI. Please add your API key in your profile.')
-  }
-
-  if (selectedAgent === 'opencode') {
-    // OpenCode can use either AI Gateway (for GPT models) or Anthropic (for Claude models)
-    // We require at least one to be present
-    const hasAiGateway = apiKeys?.AI_GATEWAY_API_KEY || process.env.AI_GATEWAY_API_KEY
-    const hasAnthropic = apiKeys?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY
-
-    if (!hasAiGateway && !hasAnthropic) {
-      errors.push(
-        'Either AI_GATEWAY_API_KEY or ANTHROPIC_API_KEY is required for OpenCode CLI. Please add at least one API key in your profile.',
-      )
-    }
+  if (selectedAgent === 'opencode' && !anthropic && !openai && !gateway) {
+    errors.push('At least one of Anthropic, OpenAI, or AI Gateway API key is required for OpenCode.')
   }
 
   // Check for GitHub token for private repositories

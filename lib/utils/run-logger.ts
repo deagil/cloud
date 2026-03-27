@@ -58,6 +58,11 @@ export class RunLogger {
     }
   }
 
+  /** Append a structured run_event (e.g. agent stream). Payload should avoid secrets. */
+  async appendEvent(type: string, payload: Record<string, unknown>): Promise<void> {
+    await this.insertEvent(type, payload)
+  }
+
   async updateStatus(status: RunStatus, message?: string): Promise<void> {
     try {
       const supabase = createAdminClient()

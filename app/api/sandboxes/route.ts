@@ -11,11 +11,11 @@ export async function GET() {
 
     const supabase = createAdminClient()
     const { data } = await supabase
-      .from('tasks')
+      .from('runs')
       .select(
         'id, prompt, repo_url, branch_name, sandbox_id, sandbox_url, created_at, status, keep_alive, max_duration',
       )
-      .eq('user_id', session.user.id)
+      .eq('created_by', session.user.id)
       .not('sandbox_id', 'is', null)
       .order('created_at', { ascending: true })
 

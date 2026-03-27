@@ -1,12 +1,12 @@
 import { Sandbox } from '@vercel/sandbox'
 import { runCommandInSandbox, runInProject } from './commands'
-import { TaskLogger } from '@/lib/utils/task-logger'
+import type { RunLogger } from '@/lib/utils/run-logger'
 
 export async function pushChangesToBranch(
   sandbox: Sandbox,
   branchName: string,
   commitMessage: string,
-  logger: TaskLogger,
+  logger: RunLogger,
 ): Promise<{ success: boolean; pushFailed?: boolean }> {
   try {
     // Check if there are any changes to commit

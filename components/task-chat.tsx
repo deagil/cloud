@@ -117,7 +117,7 @@ export function TaskChat({ taskId, task }: TaskChatProps) {
       setError(null)
 
       try {
-        const response = await fetch(`/api/tasks/${taskId}/messages`)
+        const response = await fetch(`/api/runs/${taskId}/messages`)
         const data = await response.json()
 
         if (response.ok && data.success) {
@@ -150,7 +150,7 @@ export function TaskChat({ taskId, task }: TaskChatProps) {
       setCommentsError(null)
 
       try {
-        const response = await fetch(`/api/tasks/${taskId}/pr-comments`)
+        const response = await fetch(`/api/runs/${taskId}/pr-comments`)
         const data = await response.json()
 
         if (response.ok && data.success) {
@@ -184,7 +184,7 @@ export function TaskChat({ taskId, task }: TaskChatProps) {
       setActionsError(null)
 
       try {
-        const response = await fetch(`/api/tasks/${taskId}/check-runs`)
+        const response = await fetch(`/api/runs/${taskId}/check-runs`)
         const data = await response.json()
 
         if (response.ok && data.success) {
@@ -216,7 +216,7 @@ export function TaskChat({ taskId, task }: TaskChatProps) {
       setDeploymentError(null)
 
       try {
-        const response = await fetch(`/api/tasks/${taskId}/deployment`)
+        const response = await fetch(`/api/runs/${taskId}/deployment`)
         const data = await response.json()
 
         if (response.ok && data.success) {
@@ -470,7 +470,7 @@ export function TaskChat({ taskId, task }: TaskChatProps) {
     setNewMessage('')
 
     try {
-      const response = await fetch(`/api/tasks/${taskId}/continue`, {
+      const response = await fetch(`/api/runs/${taskId}/continue`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -523,7 +523,7 @@ export function TaskChat({ taskId, task }: TaskChatProps) {
     setIsSending(true)
 
     try {
-      const response = await fetch(`/api/tasks/${taskId}/continue`, {
+      const response = await fetch(`/api/runs/${taskId}/continue`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -553,7 +553,7 @@ export function TaskChat({ taskId, task }: TaskChatProps) {
     setIsStopping(true)
 
     try {
-      const response = await fetch(`/api/tasks/${taskId}`, {
+      const response = await fetch(`/api/runs/${taskId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -777,49 +777,51 @@ export function TaskChat({ taskId, task }: TaskChatProps) {
                       </div>
                       <div className="text-xs text-foreground">
                         <Streamdown
-                          components={{
-                            code: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'>) => (
-                              <code className={`${className} !text-xs`} {...props}>
-                                {children}
-                              </code>
-                            ),
-                            pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => (
-                              <pre className="!text-xs" {...props}>
-                                {children}
-                              </pre>
-                            ),
-                            p: ({ children, ...props }: React.ComponentPropsWithoutRef<'p'>) => (
-                              <p className="text-xs" {...props}>
-                                {children}
-                              </p>
-                            ),
-                            a: ({ children, href, ...props }: React.ComponentPropsWithoutRef<'a'>) => (
-                              <a
-                                href={href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-primary hover:underline"
-                                {...props}
-                              >
-                                {children}
-                              </a>
-                            ),
-                            ul: ({ children, ...props }: React.ComponentPropsWithoutRef<'ul'>) => (
-                              <ul className="text-xs list-disc ml-4" {...props}>
-                                {children}
-                              </ul>
-                            ),
-                            ol: ({ children, ...props }: React.ComponentPropsWithoutRef<'ol'>) => (
-                              <ol className="text-xs list-decimal ml-4" {...props}>
-                                {children}
-                              </ol>
-                            ),
-                            li: ({ children, ...props }: React.ComponentPropsWithoutRef<'li'>) => (
-                              <li className="text-xs mb-2" {...props}>
-                                {Children.toArray(children).filter((c) => typeof c === 'string' || isValidElement(c))}
-                              </li>
-                            ),
-                          }}
+                          components={
+                            {
+                              code: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'>) => (
+                                <code className={`${className} !text-xs`} {...props}>
+                                  {children}
+                                </code>
+                              ),
+                              pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => (
+                                <pre className="!text-xs" {...props}>
+                                  {children}
+                                </pre>
+                              ),
+                              p: ({ children, ...props }: React.ComponentPropsWithoutRef<'p'>) => (
+                                <p className="text-xs" {...props}>
+                                  {children}
+                                </p>
+                              ),
+                              a: ({ children, href, ...props }: React.ComponentPropsWithoutRef<'a'>) => (
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-primary hover:underline"
+                                  {...props}
+                                >
+                                  {children}
+                                </a>
+                              ),
+                              ul: ({ children, ...props }: React.ComponentPropsWithoutRef<'ul'>) => (
+                                <ul className="text-xs list-disc ml-4" {...props}>
+                                  {children}
+                                </ul>
+                              ),
+                              ol: ({ children, ...props }: React.ComponentPropsWithoutRef<'ol'>) => (
+                                <ol className="text-xs list-decimal ml-4" {...props}>
+                                  {children}
+                                </ol>
+                              ),
+                              li: ({ children, ...props }: React.ComponentPropsWithoutRef<'li'>) => (
+                                <li className="text-xs mb-2" {...props}>
+                                  {Children.toArray(children).filter((c) => typeof c === 'string' || isValidElement(c))}
+                                </li>
+                              ),
+                            } as never
+                          }
                         >
                           {comment.body}
                         </Streamdown>
@@ -911,38 +913,40 @@ export function TaskChat({ taskId, task }: TaskChatProps) {
                   >
                     <div className="text-xs">
                       <Streamdown
-                        components={{
-                          code: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'>) => (
-                            <code className={`${className} !text-xs`} {...props}>
-                              {children}
-                            </code>
-                          ),
-                          pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => (
-                            <pre className="!text-xs" {...props}>
-                              {children}
-                            </pre>
-                          ),
-                          p: ({ children, ...props }: React.ComponentPropsWithoutRef<'p'>) => (
-                            <p className="text-xs" {...props}>
-                              {children}
-                            </p>
-                          ),
-                          ul: ({ children, ...props }: React.ComponentPropsWithoutRef<'ul'>) => (
-                            <ul className="text-xs list-disc ml-4" {...props}>
-                              {children}
-                            </ul>
-                          ),
-                          ol: ({ children, ...props }: React.ComponentPropsWithoutRef<'ol'>) => (
-                            <ol className="text-xs list-decimal ml-4" {...props}>
-                              {children}
-                            </ol>
-                          ),
-                          li: ({ children, ...props }: React.ComponentPropsWithoutRef<'li'>) => (
-                            <li className="text-xs mb-2" {...props}>
-                              {Children.toArray(children).filter((c) => typeof c === 'string' || isValidElement(c))}
-                            </li>
-                          ),
-                        }}
+                        components={
+                          {
+                            code: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'>) => (
+                              <code className={`${className} !text-xs`} {...props}>
+                                {children}
+                              </code>
+                            ),
+                            pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => (
+                              <pre className="!text-xs" {...props}>
+                                {children}
+                              </pre>
+                            ),
+                            p: ({ children, ...props }: React.ComponentPropsWithoutRef<'p'>) => (
+                              <p className="text-xs" {...props}>
+                                {children}
+                              </p>
+                            ),
+                            ul: ({ children, ...props }: React.ComponentPropsWithoutRef<'ul'>) => (
+                              <ul className="text-xs list-disc ml-4" {...props}>
+                                {children}
+                              </ul>
+                            ),
+                            ol: ({ children, ...props }: React.ComponentPropsWithoutRef<'ol'>) => (
+                              <ol className="text-xs list-decimal ml-4" {...props}>
+                                {children}
+                              </ol>
+                            ),
+                            li: ({ children, ...props }: React.ComponentPropsWithoutRef<'li'>) => (
+                              <li className="text-xs mb-2" {...props}>
+                                {Children.toArray(children).filter((c) => typeof c === 'string' || isValidElement(c))}
+                              </li>
+                            ),
+                          } as never
+                        }
                       >
                         {group.userMessage.content}
                       </Streamdown>
@@ -1037,85 +1041,91 @@ export function TaskChat({ taskId, task }: TaskChatProps) {
 
                             return (
                               <Streamdown
-                                components={{
-                                  code: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'>) => (
-                                    <code className={`${className} !text-xs`} {...props}>
-                                      {children}
-                                    </code>
-                                  ),
-                                  pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => (
-                                    <pre className="!text-xs" {...props}>
-                                      {children}
-                                    </pre>
-                                  ),
-                                  p: ({ children, ...props }: React.ComponentPropsWithoutRef<'p'>) => {
-                                    // Extract text from complex children structures
-                                    const childrenArray = Children.toArray(children)
-                                    const textParts: string[] = []
+                                components={
+                                  {
+                                    code: ({
+                                      className,
+                                      children,
+                                      ...props
+                                    }: React.ComponentPropsWithoutRef<'code'>) => (
+                                      <code className={`${className} !text-xs`} {...props}>
+                                        {children}
+                                      </code>
+                                    ),
+                                    pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => (
+                                      <pre className="!text-xs" {...props}>
+                                        {children}
+                                      </pre>
+                                    ),
+                                    p: ({ children, ...props }: React.ComponentPropsWithoutRef<'p'>) => {
+                                      // Extract text from complex children structures
+                                      const childrenArray = Children.toArray(children)
+                                      const textParts: string[] = []
 
-                                    childrenArray.forEach((child) => {
-                                      if (typeof child === 'string') {
-                                        textParts.push(child)
-                                      } else if (isValidElement(child)) {
-                                        // It's a React element - keep it as-is, don't stringify
-                                        // This will be handled by React
-                                      }
-                                      // Skip plain objects entirely
-                                    })
-
-                                    const text = textParts.join('')
-                                    const hasShimmerMarker = text.includes('🔄SHIMMER🔄')
-                                    const isToolCall =
-                                      /^(🔄SHIMMER🔄)?(Editing|Reading|Running|Listing|Executing|Searching|Finding|Grep)/i.test(
-                                        text,
-                                      )
-
-                                    // Always remove the marker from display (global replace to catch all instances)
-                                    const displayText = text.replace(/🔄SHIMMER🔄/g, '')
-
-                                    // If we have React elements, also remove marker from string children
-                                    const hasReactElements = childrenArray.some((child) => isValidElement(child))
-                                    const cleanedChildren = hasReactElements
-                                      ? childrenArray
-                                          .map((child) =>
-                                            typeof child === 'string' ? child.replace(/🔄SHIMMER🔄/g, '') : child,
-                                          )
-                                          .filter((child) => typeof child === 'string' || isValidElement(child))
-                                      : displayText
-
-                                    return (
-                                      <p
-                                        className={
-                                          isToolCall
-                                            ? hasShimmerMarker
-                                              ? 'bg-gradient-to-r from-muted-foreground from-20% via-foreground/40 via-50% to-muted-foreground to-80% bg-clip-text text-transparent bg-[length:300%_100%] animate-[shimmer_1.5s_linear_infinite]'
-                                              : 'text-muted-foreground/60'
-                                            : ''
+                                      childrenArray.forEach((child) => {
+                                        if (typeof child === 'string') {
+                                          textParts.push(child)
+                                        } else if (isValidElement(child)) {
+                                          // It's a React element - keep it as-is, don't stringify
+                                          // This will be handled by React
                                         }
-                                        {...props}
-                                      >
-                                        {cleanedChildren}
-                                      </p>
-                                    )
-                                  },
-                                  ul: ({ children, ...props }: React.ComponentPropsWithoutRef<'ul'>) => (
-                                    <ul className="text-xs list-disc ml-4" {...props}>
-                                      {children}
-                                    </ul>
-                                  ),
-                                  ol: ({ children, ...props }: React.ComponentPropsWithoutRef<'ol'>) => (
-                                    <ol className="text-xs list-decimal ml-4" {...props}>
-                                      {children}
-                                    </ol>
-                                  ),
-                                  li: ({ children, ...props }: React.ComponentPropsWithoutRef<'li'>) => (
-                                    <li className="text-xs mb-2" {...props}>
-                                      {Children.toArray(children).filter(
-                                        (c) => typeof c === 'string' || isValidElement(c),
-                                      )}
-                                    </li>
-                                  ),
-                                }}
+                                        // Skip plain objects entirely
+                                      })
+
+                                      const text = textParts.join('')
+                                      const hasShimmerMarker = text.includes('🔄SHIMMER🔄')
+                                      const isToolCall =
+                                        /^(🔄SHIMMER🔄)?(Editing|Reading|Running|Listing|Executing|Searching|Finding|Grep)/i.test(
+                                          text,
+                                        )
+
+                                      // Always remove the marker from display (global replace to catch all instances)
+                                      const displayText = text.replace(/🔄SHIMMER🔄/g, '')
+
+                                      // If we have React elements, also remove marker from string children
+                                      const hasReactElements = childrenArray.some((child) => isValidElement(child))
+                                      const cleanedChildren = hasReactElements
+                                        ? childrenArray
+                                            .map((child) =>
+                                              typeof child === 'string' ? child.replace(/🔄SHIMMER🔄/g, '') : child,
+                                            )
+                                            .filter((child) => typeof child === 'string' || isValidElement(child))
+                                        : displayText
+
+                                      return (
+                                        <p
+                                          className={
+                                            isToolCall
+                                              ? hasShimmerMarker
+                                                ? 'bg-gradient-to-r from-muted-foreground from-20% via-foreground/40 via-50% to-muted-foreground to-80% bg-clip-text text-transparent bg-[length:300%_100%] animate-[shimmer_1.5s_linear_infinite]'
+                                                : 'text-muted-foreground/60'
+                                              : ''
+                                          }
+                                          {...props}
+                                        >
+                                          {cleanedChildren}
+                                        </p>
+                                      )
+                                    },
+                                    ul: ({ children, ...props }: React.ComponentPropsWithoutRef<'ul'>) => (
+                                      <ul className="text-xs list-disc ml-4" {...props}>
+                                        {children}
+                                      </ul>
+                                    ),
+                                    ol: ({ children, ...props }: React.ComponentPropsWithoutRef<'ol'>) => (
+                                      <ol className="text-xs list-decimal ml-4" {...props}>
+                                        {children}
+                                      </ol>
+                                    ),
+                                    li: ({ children, ...props }: React.ComponentPropsWithoutRef<'li'>) => (
+                                      <li className="text-xs mb-2" {...props}>
+                                        {Children.toArray(children).filter(
+                                          (c) => typeof c === 'string' || isValidElement(c),
+                                        )}
+                                      </li>
+                                    ),
+                                  } as never
+                                }
                               >
                                 {processedContent}
                               </Streamdown>

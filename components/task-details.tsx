@@ -359,8 +359,8 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
 
         const endpoint =
           viewMode === 'all' || viewMode === 'all-local'
-            ? `/api/tasks/${task.id}/file-content`
-            : `/api/tasks/${task.id}/diff`
+            ? `/api/runs/${task.id}/file-content`
+            : `/api/runs/${task.id}/diff`
 
         if (viewMode === 'local' || viewMode === 'all-local') {
           params.set('mode', 'local')
@@ -611,7 +611,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
 
     const checkHealth = async () => {
       try {
-        const response = await fetch(`/api/tasks/${task.id}/sandbox-health`)
+        const response = await fetch(`/api/runs/${task.id}/sandbox-health`)
         if (response.ok) {
           const data = await response.json()
           const currentStatus = data.status
@@ -816,7 +816,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
       setLoadingDeployment(true)
 
       try {
-        const response = await fetch(`/api/tasks/${task.id}/deployment`)
+        const response = await fetch(`/api/runs/${task.id}/deployment`)
         if (response.ok) {
           const result = await response.json()
           if (result.success && result.data.hasDeployment && result.data.previewUrl) {
@@ -903,7 +903,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
       // Sync if status is 'open' (could have been merged/closed) OR if status is not set
       if (task.prStatus === 'open' || !task.prStatus) {
         try {
-          const response = await fetch(`/api/tasks/${task.id}/sync-pr`, {
+          const response = await fetch(`/api/runs/${task.id}/sync-pr`, {
             method: 'POST',
           })
           const result = await response.json()
@@ -948,7 +948,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
             const params = new URLSearchParams()
             params.set('filename', filename)
 
-            const response = await fetch(`/api/tasks/${task.id}/diff?${params.toString()}`)
+            const response = await fetch(`/api/runs/${task.id}/diff?${params.toString()}`)
             const result = await response.json()
 
             if (response.ok && result.success) {
@@ -1215,7 +1215,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
     setIsReopeningPR(true)
     console.log('[Reopen] Starting reopen - isReopeningPR:', true, 'prStatus:', prStatus)
     try {
-      const response = await fetch(`/api/tasks/${task.id}/reopen-pr`, {
+      const response = await fetch(`/api/runs/${task.id}/reopen-pr`, {
         method: 'POST',
       })
 
@@ -1241,7 +1241,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
     setIsClosingPR(true)
     console.log('[Close] Starting close - isClosingPR:', true, 'prStatus:', prStatus)
     try {
-      const response = await fetch(`/api/tasks/${task.id}/close-pr`, {
+      const response = await fetch(`/api/runs/${task.id}/close-pr`, {
         method: 'POST',
       })
 
@@ -1264,7 +1264,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
   const handleTryAgain = async () => {
     setIsTryingAgain(true)
     try {
-      const response = await fetch('/api/tasks', {
+      const response = await fetch('/api/runs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1285,7 +1285,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
         const result = await response.json()
         toast.success('New task created successfully!')
         setShowTryAgainDialog(false)
-        router.push(`/tasks/${result.task.id}`)
+        router.push(`/runs/${result.task.id}`)
       } else {
         const error = await response.json()
         toast.error(error.error || 'Failed to create new task')
@@ -1301,7 +1301,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
   const handleDelete = async () => {
     setIsDeleting(true)
     try {
-      const response = await fetch(`/api/tasks/${task.id}`, {
+      const response = await fetch(`/api/runs/${task.id}`, {
         method: 'DELETE',
       })
 
@@ -1325,7 +1325,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
   const handleRestartDevServer = async () => {
     setIsRestartingDevServer(true)
     try {
-      const response = await fetch(`/api/tasks/${task.id}/restart-dev`, {
+      const response = await fetch(`/api/runs/${task.id}/restart-dev`, {
         method: 'POST',
       })
 
@@ -1350,7 +1350,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
   const handleStopSandbox = async () => {
     setIsStoppingSandbox(true)
     try {
-      const response = await fetch(`/api/tasks/${task.id}/stop-sandbox`, {
+      const response = await fetch(`/api/runs/${task.id}/stop-sandbox`, {
         method: 'POST',
       })
 
@@ -1373,7 +1373,7 @@ export function TaskDetails({ task, maxSandboxDuration = 300 }: TaskDetailsProps
   const handleStartSandbox = async () => {
     setIsStartingSandbox(true)
     try {
-      const response = await fetch(`/api/tasks/${task.id}/start-sandbox`, {
+      const response = await fetch(`/api/runs/${task.id}/start-sandbox`, {
         method: 'POST',
       })
 

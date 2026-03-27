@@ -5,12 +5,14 @@ import { runCommandInSandbox, runInProject, PROJECT_DIR } from './commands'
 import { generateId } from '@/lib/utils/id'
 import { SandboxConfig, SandboxResult } from './types'
 import { redactSensitiveInfo } from '@/lib/utils/logging'
-import { TaskLogger } from '@/lib/utils/task-logger'
+import type { RunLogger } from '@/lib/utils/run-logger'
+import { startSandboxAgentDaemon } from '@/lib/sandbox/agent-client'
+import { SANDBOX_AGENT_PORT } from '@/lib/sandbox/constants'
 import { detectPackageManager, installDependencies } from './package-manager'
 import { registerSandbox } from './sandbox-registry'
 
 // Helper function to run command and log it
-async function runAndLogCommand(sandbox: Sandbox, command: string, args: string[], logger: TaskLogger, cwd?: string) {
+async function runAndLogCommand(sandbox: Sandbox, command: string, args: string[], logger: RunLogger, cwd?: string) {
   // Properly escape arguments for shell execution
   const escapeArg = (arg: string) => {
     // Escape single quotes by replacing ' with '\''
@@ -44,7 +46,7 @@ async function runAndLogCommand(sandbox: Sandbox, command: string, args: string[
   return result
 }
 
-export async function createSandbox(config: SandboxConfig, logger: TaskLogger): Promise<SandboxResult> {
+export async function createSandbox(config: SandboxConfig, logger: RunLogger): Promise<SandboxResult> {
   try {
     await logger.info('Processing repository URL')
 
@@ -77,6 +79,7 @@ export async function createSandbox(config: SandboxConfig, logger: TaskLogger): 
     // Determine ports based on project type (will be detected after cloning)
     // Default to both 3000 (Next.js) and 5173 (Vite) for now
     const defaultPorts = config.ports || [3000, 5173]
+    const ports = [...new Set([...defaultPorts, SANDBOX_AGENT_PORT])]
 
     // Create sandbox without source - we'll clone manually to /vercel/sandbox/project
     const sandboxConfig = {
@@ -84,7 +87,7 @@ export async function createSandbox(config: SandboxConfig, logger: TaskLogger): 
       projectId: process.env.SANDBOX_VERCEL_PROJECT_ID!,
       token: process.env.SANDBOX_VERCEL_TOKEN!,
       timeout: timeoutMs,
-      ports: defaultPorts,
+      ports,
       runtime: config.runtime || 'node22',
       resources: { vcpus: config.resources?.vcpus || 4 },
     }
@@ -100,7 +103,7 @@ export async function createSandbox(config: SandboxConfig, logger: TaskLogger): 
       await logger.info('Sandbox created successfully')
 
       // Register the sandbox immediately for potential killing
-      registerSandbox(config.taskId, sandbox, config.keepAlive || false)
+      registerSandbox(config.runId, sandbox, config.keepAlive || false)
 
       // Check for cancellation after sandbox creation
       if (config.onCancellationCheck && (await config.onCancellationCheck())) {
@@ -976,6 +979,13 @@ SKILL_EOF`
       }
 
       await logger.info('Successfully created fallback branch')
+    }
+
+    try {
+      await startSandboxAgentDaemon(sandbox, logger)
+    } catch {
+      await logger.error('Sandbox agent daemon failed to start')
+      throw new Error('Sandbox agent daemon failed to start')
     }
 
     return {

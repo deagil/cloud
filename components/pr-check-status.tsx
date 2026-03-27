@@ -27,7 +27,7 @@ export function PRCheckStatus({ taskId, prStatus, isActive = false, className = 
   useEffect(() => {
     const fetchCheckRuns = async () => {
       try {
-        const response = await fetch(`/api/tasks/${taskId}/check-runs`)
+        const response = await fetch(`/api/runs/${taskId}/check-runs`)
         if (response.ok) {
           const data = await response.json()
           if (data.success && data.checkRuns) {

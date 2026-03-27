@@ -214,7 +214,7 @@ export function RepoPullRequests({ owner, repo }: RepoPullRequestsProps) {
       const repoUrl = `https://github.com/${owner}/${repo}`
       const prompt = `Work on PR #${selectedPR.number}: ${selectedPR.title}${selectedPR.body ? `\n\n${selectedPR.body}` : ''}`
 
-      const response = await fetch('/api/tasks', {
+      const response = await fetch('/api/runs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -234,7 +234,7 @@ export function RepoPullRequests({ owner, repo }: RepoPullRequestsProps) {
         const result = await response.json()
         toast.success('Task created successfully!')
         setShowCreateTaskDialog(false)
-        router.push(`/tasks/${result.task.id}`)
+        router.push(`/runs/${result.task.id}`)
       } else {
         const error = await response.json()
         toast.error(error.error || 'Failed to create task')

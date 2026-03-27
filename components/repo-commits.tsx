@@ -105,10 +105,10 @@ export function RepoCommits({ owner, repo }: RepoCommitsProps) {
       })
 
       // Navigate to the new task page
-      router.push(`/tasks/${id}`)
+      router.push(`/runs/${id}`)
 
       // Submit the task to the backend
-      const response = await fetch('/api/tasks', {
+      const response = await fetch('/api/runs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

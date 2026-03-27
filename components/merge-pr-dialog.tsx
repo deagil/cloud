@@ -48,7 +48,7 @@ export function MergePRDialog({
     }
 
     try {
-      const response = await fetch(`/api/tasks/${taskId}/merge-pr`, {
+      const response = await fetch(`/api/runs/${taskId}/merge-pr`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -89,7 +89,7 @@ export function MergePRDialog({
 
     try {
       // Send a follow-up message to the current task to fix merge conflicts
-      const response = await fetch(`/api/tasks/${taskId}/continue`, {
+      const response = await fetch(`/api/runs/${taskId}/continue`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -59,7 +59,7 @@ export function SandboxesDialog({ open, onOpenChange }: SandboxesDialogProps) {
   const handleStopSandbox = async (taskId: string) => {
     setStoppingId(taskId)
     try {
-      const response = await fetch(`/api/tasks/${taskId}/stop-sandbox`, {
+      const response = await fetch(`/api/runs/${taskId}/stop-sandbox`, {
         method: 'POST',
       })
 
@@ -81,7 +81,7 @@ export function SandboxesDialog({ open, onOpenChange }: SandboxesDialogProps) {
 
   const handleViewTask = (taskId: string) => {
     onOpenChange(false)
-    router.push(`/tasks/${taskId}`)
+    router.push(`/runs/${taskId}`)
   }
 
   const calculateTimeRemaining = (createdAt: Date, maxDuration: number | null) => {

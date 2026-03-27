@@ -73,11 +73,15 @@ export function SignOut({ user, authProvider }: Pick<Session, 'user' | 'authProv
         const response = await fetch('/api/auth/rate-limit')
         if (response.ok && mounted) {
           const data = await response.json()
-          setRateLimit({
-            used: data.used,
-            total: data.total,
-            remaining: data.remaining,
-          })
+          if (data.unlimited) {
+            setRateLimit(null)
+          } else {
+            setRateLimit({
+              used: data.used,
+              total: data.total,
+              remaining: data.remaining,
+            })
+          }
         }
       } catch (error) {
         console.error('Failed to fetch rate limit:', error)
@@ -93,11 +97,15 @@ export function SignOut({ user, authProvider }: Pick<Session, 'user' | 'authProv
       const response = await fetch('/api/auth/rate-limit')
       if (response.ok) {
         const data = await response.json()
-        setRateLimit({
-          used: data.used,
-          total: data.total,
-          remaining: data.remaining,
-        })
+        if (data.unlimited) {
+          setRateLimit(null)
+        } else {
+          setRateLimit({
+            used: data.used,
+            total: data.total,
+            remaining: data.remaining,
+          })
+        }
       }
     } catch (error) {
       console.error('Failed to fetch rate limit:', error)

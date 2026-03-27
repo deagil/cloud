@@ -21,17 +21,17 @@ export async function GET(
     const repoUrl = `https://github.com/${owner}/${repo}`
     const supabase = createAdminClient()
 
-    const { data: existingTask } = await supabase
-      .from('tasks')
+    const { data: existingRun } = await supabase
+      .from('runs')
       .select('id')
-      .eq('user_id', session.user.id)
+      .eq('created_by', session.user.id)
       .eq('pr_number', prNumber)
       .eq('repo_url', repoUrl)
       .is('deleted_at', null)
       .limit(1)
       .maybeSingle()
 
-    return NextResponse.json({ hasTask: !!existingTask, taskId: existingTask?.id ?? null })
+    return NextResponse.json({ hasTask: !!existingRun, taskId: existingRun?.id ?? null })
   } catch (error) {
     console.error('Error checking for existing task:', error)
     return NextResponse.json({ error: 'Failed to check for existing task' }, { status: 500 })

@@ -112,7 +112,7 @@ export function TasksListClient({ user, authProvider, initialStars = 1200 }: Tas
 
   const fetchTasks = async () => {
     try {
-      const response = await fetch('/api/tasks')
+      const response = await fetch('/api/runs')
       if (response.ok) {
         const data = await response.json()
         setTasks(data.tasks)
@@ -152,7 +152,7 @@ export function TasksListClient({ user, authProvider, initialStars = 1200 }: Tas
     setIsDeleting(true)
     try {
       const deletePromises = Array.from(selectedTasks).map((taskId) =>
-        fetch(`/api/tasks/${taskId}`, {
+        fetch(`/api/runs/${taskId}`, {
           method: 'DELETE',
         }),
       )
@@ -189,7 +189,7 @@ export function TasksListClient({ user, authProvider, initialStars = 1200 }: Tas
           return task?.status === 'processing'
         })
         .map((taskId) =>
-          fetch(`/api/tasks/${taskId}`, {
+          fetch(`/api/runs/${taskId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'stop' }),
@@ -366,7 +366,7 @@ export function TasksListClient({ user, authProvider, initialStars = 1200 }: Tas
                     if ((e.target as HTMLElement).closest('input[type="checkbox"]')) {
                       return
                     }
-                    router.push(`/tasks/${task.id}`)
+                    router.push(`/runs/${task.id}`)
                   }}
                 >
                   <CardContent className="px-3 py-2">

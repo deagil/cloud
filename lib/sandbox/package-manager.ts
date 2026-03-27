@@ -1,9 +1,9 @@
 import { Sandbox } from '@vercel/sandbox'
 import { runInProject } from './commands'
-import { TaskLogger } from '@/lib/utils/task-logger'
+import type { RunLogger } from '@/lib/utils/run-logger'
 
 // Helper function to detect package manager based on lock files
-export async function detectPackageManager(sandbox: Sandbox, logger: TaskLogger): Promise<'pnpm' | 'yarn' | 'npm'> {
+export async function detectPackageManager(sandbox: Sandbox, logger: RunLogger): Promise<'pnpm' | 'yarn' | 'npm'> {
   // Check for lock files in order of preference
   const pnpmLockCheck = await runInProject(sandbox, 'test', ['-f', 'pnpm-lock.yaml'])
   if (pnpmLockCheck.success) {
@@ -32,7 +32,7 @@ export async function detectPackageManager(sandbox: Sandbox, logger: TaskLogger)
 export async function installDependencies(
   sandbox: Sandbox,
   packageManager: 'pnpm' | 'yarn' | 'npm',
-  logger: TaskLogger,
+  logger: RunLogger,
 ): Promise<{ success: boolean; error?: string }> {
   let installCommand: string[]
   let logMessage: string

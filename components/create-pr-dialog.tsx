@@ -61,7 +61,7 @@ export function CreatePRDialog({
     setIsCreating(true)
 
     try {
-      const response = await fetch(`/api/tasks/${taskId}/pr`, {
+      const response = await fetch(`/api/runs/${taskId}/pr`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

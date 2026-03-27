@@ -230,6 +230,35 @@ export interface Database {
           created_at?: string
         }
       }
+      thread_messages: {
+        Row: {
+          id: string
+          thread_id: string
+          author_user_id: string | null
+          role: 'user' | 'agent' | 'system'
+          content: string
+          run_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          thread_id: string
+          author_user_id?: string | null
+          role: 'user' | 'agent' | 'system'
+          content: string
+          run_id?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          thread_id?: string
+          author_user_id?: string | null
+          role?: 'user' | 'agent' | 'system'
+          content?: string
+          run_id?: string | null
+          created_at?: string
+        }
+      }
       runs: {
         Row: {
           id: string
@@ -253,6 +282,14 @@ export interface Database {
           pr_merge_commit_sha: string | null
           progress: number
           error: string | null
+          repo_url: string | null
+          max_duration: number
+          keep_alive: boolean
+          install_dependencies: boolean
+          enable_browser: boolean
+          mcp_server_ids: Json | null
+          logs: Json | null
+          preview_url: string | null
           created_at: string
           updated_at: string
           completed_at: string | null
@@ -280,6 +317,14 @@ export interface Database {
           pr_merge_commit_sha?: string | null
           progress?: number
           error?: string | null
+          preview_url?: string | null
+          repo_url?: string | null
+          max_duration?: number
+          keep_alive?: boolean
+          install_dependencies?: boolean
+          enable_browser?: boolean
+          mcp_server_ids?: Json | null
+          logs?: Json | null
           created_at?: string
           updated_at?: string
           completed_at?: string | null
@@ -307,6 +352,14 @@ export interface Database {
           pr_merge_commit_sha?: string | null
           progress?: number
           error?: string | null
+          repo_url?: string | null
+          max_duration?: number
+          keep_alive?: boolean
+          install_dependencies?: boolean
+          enable_browser?: boolean
+          mcp_server_ids?: Json | null
+          logs?: Json | null
+          preview_url?: string | null
           created_at?: string
           updated_at?: string
           completed_at?: string | null

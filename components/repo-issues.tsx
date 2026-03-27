@@ -195,7 +195,7 @@ export function RepoIssues({ owner, repo }: RepoIssuesProps) {
       const repoUrl = `https://github.com/${owner}/${repo}`
       const prompt = `Fix issue #${selectedIssue.number}: ${selectedIssue.title}${selectedIssue.body ? `\n\n${selectedIssue.body}` : ''}`
 
-      const response = await fetch('/api/tasks', {
+      const response = await fetch('/api/runs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -215,7 +215,7 @@ export function RepoIssues({ owner, repo }: RepoIssuesProps) {
         const result = await response.json()
         toast.success('Task created successfully!')
         setShowCreateTaskDialog(false)
-        router.push(`/tasks/${result.task.id}`)
+        router.push(`/runs/${result.task.id}`)
       } else {
         const error = await response.json()
         toast.error(error.error || 'Failed to create task')

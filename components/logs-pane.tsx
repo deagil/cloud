@@ -185,7 +185,7 @@ export function LogsPane({ task, onHeightChange }: LogsPaneProps) {
 
     setIsClearingLogs(true)
     try {
-      const response = await fetch(`/api/tasks/${task.id}/clear-logs`, {
+      const response = await fetch(`/api/runs/${task.id}/clear-logs`, {
         method: 'POST',
       })
 

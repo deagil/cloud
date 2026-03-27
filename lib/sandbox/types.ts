@@ -1,8 +1,7 @@
 import { Sandbox } from '@vercel/sandbox'
-import { LogEntry } from '@/lib/db/schema'
 
 export interface SandboxConfig {
-  taskId: string
+  runId: string
   repoUrl: string
   githubToken?: string | null
   gitAuthorName?: string
@@ -48,6 +47,5 @@ export interface AgentExecutionResult {
   changesDetected?: boolean
   error?: string
   streamingLogs?: unknown[]
-  logs?: LogEntry[]
-  sessionId?: string // For Cursor agent session resumption
+  sessionId?: string | null
 }

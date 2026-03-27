@@ -47,6 +47,26 @@ export async function getGitHubUser(): Promise<{
   }
 }
 
+export async function getGitHubUserForToken(accessToken: string | null): Promise<{
+  username: string
+  name: string | null
+  email: string | null
+} | null> {
+  if (!accessToken) return null
+  try {
+    const octokit = new Octokit({ auth: accessToken })
+    const { data } = await octokit.rest.users.getAuthenticated()
+    return {
+      username: data.login,
+      name: data.name,
+      email: data.email,
+    }
+  } catch (error) {
+    console.error('Error getting GitHub user for token:', error)
+    return null
+  }
+}
+
 /**
  * Parse a GitHub repository URL to extract owner and repo
  */

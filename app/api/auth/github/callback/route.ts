@@ -111,9 +111,9 @@ export async function GET(req: NextRequest): Promise<Response> {
 
       await saveSession(res, session)
 
-      res.cookies.delete('github_auth_state', { path: '/' })
-      res.cookies.delete('github_auth_redirect_to', { path: '/' })
-      res.cookies.delete('github_auth_mode', { path: '/' })
+      res.cookies.set('github_auth_state', '', { path: '/', maxAge: 0 })
+      res.cookies.set('github_auth_redirect_to', '', { path: '/', maxAge: 0 })
+      res.cookies.set('github_auth_mode', '', { path: '/', maxAge: 0 })
 
       return res
     } else {
@@ -143,13 +143,13 @@ export async function GET(req: NextRequest): Promise<Response> {
       const returnPath = safeOAuthReturnPath(storedRedirectTo)
       const res = NextResponse.redirect(new URL(returnPath, req.nextUrl.origin))
 
-      res.cookies.delete('github_oauth_state', { path: '/' })
-      res.cookies.delete('github_oauth_redirect_to', { path: '/' })
-      res.cookies.delete('github_oauth_user_id', { path: '/' })
+      res.cookies.set('github_oauth_state', '', { path: '/', maxAge: 0 })
+      res.cookies.set('github_oauth_redirect_to', '', { path: '/', maxAge: 0 })
+      res.cookies.set('github_oauth_user_id', '', { path: '/', maxAge: 0 })
       if (authMode) {
-        res.cookies.delete('github_auth_state', { path: '/' })
-        res.cookies.delete('github_auth_redirect_to', { path: '/' })
-        res.cookies.delete('github_auth_mode', { path: '/' })
+        res.cookies.set('github_auth_state', '', { path: '/', maxAge: 0 })
+        res.cookies.set('github_auth_redirect_to', '', { path: '/', maxAge: 0 })
+        res.cookies.set('github_auth_mode', '', { path: '/', maxAge: 0 })
       }
 
       return res

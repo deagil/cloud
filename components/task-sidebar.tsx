@@ -315,7 +315,7 @@ export function TaskSidebar({ tasks, width = 288 }: TaskSidebarProps) {
       if (deleteFailed) actions.push('failed')
       if (deleteStopped) actions.push('stopped')
 
-      const response = await fetch(`/api/tasks?action=${actions.join(',')}`, {
+      const response = await fetch(`/api/runs?action=${actions.join(',')}`, {
         method: 'DELETE',
       })
 
@@ -504,12 +504,14 @@ export function TaskSidebar({ tasks, width = 288 }: TaskSidebarProps) {
           ) : (
             <>
               {tasks.slice(0, 10).map((task) => {
-                const isActive = pathname === `/tasks/${task.id}`
+                const threadHref = task.threadId ? `/threads/${task.threadId}` : `/runs/${task.id}`
+                const isActive =
+                  pathname === `/runs/${task.id}` || (!!task.threadId && pathname === `/threads/${task.threadId}`)
 
                 return (
                   <Link
                     key={task.id}
-                    href={`/tasks/${task.id}`}
+                    href={threadHref}
                     onClick={handleLinkClick}
                     className={cn('block rounded-lg', isActive && 'ring-1 ring-primary/50 ring-offset-0')}
                   >
