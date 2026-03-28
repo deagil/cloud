@@ -136,31 +136,39 @@ button {
   }
 }
 
-@keyframes rainbow-shift {
+@keyframes rainbow-shimmer {
   0% {
-    background-position: 0% 50%;
+    background-position:
+      0% 50%,
+      200% 0;
   }
   100% {
-    background-position: 100% 50%;
+    background-position:
+      100% 50%,
+      -200% 0;
   }
 }
 
 .rainbow-title {
-  background-image: linear-gradient(
-    90deg,
-    #ff4d4d,
-    #ff9f1c,
-    #ffe66d,
-    #4cd964,
-    #2d9cdb,
-    #9b5de5,
-    #ff4d4d
-  );
-  background-size: 300% 100%;
+  background-image:
+    linear-gradient(
+      90deg,
+      #ff4d4d,
+      #ff9f1c,
+      #ffe66d,
+      #4cd964,
+      #2d9cdb,
+      #9b5de5,
+      #ff4d4d
+    ),
+    linear-gradient(90deg, transparent 35%, rgba(255, 255, 255, 0.95) 50%, transparent 65%);
+  background-size:
+    300% 100%,
+    200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: rainbow-shift 8s linear infinite;
+  animation: rainbow-shimmer 5s linear infinite;
 }
 
 /* Git Diff Viewer Mobile Optimizations */
